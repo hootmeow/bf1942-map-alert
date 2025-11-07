@@ -11,7 +11,6 @@ import asyncio
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 # --- REFACTORED ---
-# Set this in your .env file
 # e.g. POSTGRES_DSN=postgres://bf1942_db_user:PASSWORD@your_host:5432/bf1942_data
 POSTGRES_DSN = os.getenv("POSTGRES_DSN")
 
@@ -26,16 +25,25 @@ bot.db_pool = None  # --- REFACTORED --- Will hold the connection pool
 last_known_maps = {}
 
 # --- AUTOCOMPLETE FUNCTIONS ---
-# --- REFACTORED ---
+# --- REFACTORED & FIXED ---
 async def search_servers(ctx: discord.AutocompleteContext):
     """Provides server name suggestions for autocomplete."""
     if not bot.db_pool:
         return []
     
-    query = "SELECT server_name FROM live_server_snapshot WHERE server_name ILIKE $1 AND status = 'online' ORDER BY player_count DESC LIMIT 25"
+    # We must join with the servers table to find the active ones
+    query = """
+    SELECT s.current_server_name
+    FROM servers s
+    WHERE s.current_server_name ILIKE $1
+      AND s.current_state IN ('ACTIVE', 'EMPTY')
+    ORDER BY s.current_player_count DESC
+    LIMIT 25;
+    """
     try:
         rows = await bot.db_pool.fetch(query, f"{ctx.value}%")
-        return [row['server_name'] for row in rows]
+        # The schema from \d servers shows 'current_server_name'
+        return [row['current_server_name'] for row in rows]
     except Exception as e:
         print(f"Error in search_servers: {e}")
         return []
@@ -46,7 +54,7 @@ async def search_maps(ctx: discord.AutocompleteContext):
     if not bot.db_pool:
         return []
     
-    # We query the 'rounds' table for a distinct list of map names
+    # This query remains correct
     query = "SELECT DISTINCT map_name FROM rounds WHERE map_name ILIKE $1 LIMIT 25"
     try:
         rows = await bot.db_pool.fetch(query, f"{ctx.value}%")
@@ -64,7 +72,7 @@ async def subscribe(
     players_over: Option(int, "Optional: Only alert if player count is over this number", required=False, default=0)
 ):
     # --- REFACTORED ---
-    # Use SQL INSERT... ON CONFLICT for an "upsert"
+    # This command was correct as it only touches the 'subscriptions' table
     query = """
     INSERT INTO subscriptions (user_id, server_name, map_name, players_over, guild_id)
     VALUES ($1, $2, $3, $4, $5)
@@ -91,6 +99,7 @@ async def subscribe(
 @bot.slash_command(name="list", description="See all of your current map alerts.")
 async def list_subscriptions(ctx: discord.ApplicationContext):
     # --- REFACTORED ---
+    # This command was correct as it only touches the 'subscriptions' table
     query = "SELECT server_name, map_name, players_over FROM subscriptions WHERE user_id = $1"
     try:
         user_subs = await bot.db_pool.fetch(query, ctx.author.id)
@@ -113,6 +122,7 @@ async def list_subscriptions(ctx: discord.ApplicationContext):
 @bot.slash_command(name="unsubscribe", description="Removes all of your active map alerts.")
 async def unsubscribe(ctx: discord.ApplicationContext):
     # --- REFACTORED ---
+    # This command was correct as it only touches the 'subscriptions' table
     try:
         status = await bot.db_pool.execute("DELETE FROM subscriptions WHERE user_id = $1", ctx.author.id)
         # asyncpg returns a string like 'DELETE 5'
@@ -126,12 +136,13 @@ async def unsubscribe(ctx: discord.ApplicationContext):
 @bot.slash_command(name="servers", description="See a live list of active BF1942 servers.")
 async def servers(ctx: discord.ApplicationContext):
     await ctx.defer(ephemeral=True)
-    # --- REFACTORED ---
+    # --- REFACTORED & FIXED ---
+    # Query the 'servers' table and filter on its state
     query = """
-    SELECT server_name, map_name, player_count, max_players
-    FROM live_server_snapshot
-    WHERE status = 'online'
-    ORDER BY player_count DESC
+    SELECT current_server_name, current_map, current_player_count, current_max_players
+    FROM servers
+    WHERE current_state IN ('ACTIVE', 'EMPTY')
+    ORDER BY current_player_count DESC
     LIMIT 25;
     """
     try:
@@ -146,10 +157,10 @@ async def servers(ctx: discord.ApplicationContext):
             color=discord.Color.green()
         )
         for server in server_list:
-            players = f"{server['player_count']}/{server['max_players']}"
+            players = f"{server['current_player_count']}/{server['current_max_players']}"
             embed.add_field(
-                name=f"**{server['server_name']}**",
-                value=f"🗺️ Map: **{server['map_name']}** | 👥 Players: **{players}**",
+                name=f"**{server['current_server_name']}**",
+                value=f"🗺️ Map: **{server['current_map']}** | 👥 Players: **{players}**",
                 inline=False
             )
         await ctx.followup.send(embed=embed)
@@ -164,12 +175,12 @@ async def playing(
     map_name: Option(str, "Start typing the map name", autocomplete=search_maps)
 ):
     await ctx.defer(ephemeral=True)
-    # --- REFACTORED ---
+    # --- REFACTORED & FIXED ---
     query = """
-    SELECT server_name, player_count, max_players
-    FROM live_server_snapshot
-    WHERE status = 'online' AND map_name ILIKE $1
-    ORDER BY player_count DESC;
+    SELECT current_server_name, current_player_count, current_max_players
+    FROM servers
+    WHERE current_state IN ('ACTIVE', 'EMPTY') AND current_map ILIKE $1
+    ORDER BY current_player_count DESC;
     """
     try:
         server_list = await bot.db_pool.fetch(query, map_name)
@@ -180,8 +191,8 @@ async def playing(
         embed = discord.Embed(title=f"Servers Playing: {map_name}", color=discord.Color.orange())
         description = ""
         for server in server_list:
-            players = f"{server['player_count']}/{server['max_players']}"
-            description += f"**{server['server_name']}** ({players} players)\n"
+            players = f"{server['current_player_count']}/{server['current_max_players']}"
+            description += f"**{server['current_server_name']}** ({players} players)\n"
         embed.description = description
         await ctx.followup.send(embed=embed)
     except Exception as e:
@@ -196,16 +207,16 @@ async def serverinfo(
 ):
     await ctx.defer(ephemeral=True)
 
-    # --- REFACTORED ---
-    # We join live_server_snapshot with servers to get the game port
+    # --- REFACTORED & FIXED ---
+    # We must JOIN servers (s) with live_server_snapshot (lss)
     server_query = """
     SELECT
-        lss.server_ip, lss.server_port, lss.server_name, lss.map_name, lss.player_count, lss.max_players,
-        lss.gametype, lss.round_time_remain, lss.tickets1, lss.tickets2, lss.unpure_mods,
-        s.current_game_port
-    FROM live_server_snapshot lss
-    LEFT JOIN servers s ON lss.server_ip = s.ip AND lss.server_port = s.port
-    WHERE lss.server_name = $1 AND lss.status = 'online';
+        s.ip, s.port, s.current_server_name, s.current_map, s.current_player_count, s.current_max_players,
+        s.current_gametype, s.current_game_port,
+        lss.round_time_remain, lss.tickets1, lss.tickets2, lss.unpure_mods
+    FROM servers s
+    LEFT JOIN live_server_snapshot lss ON s.ip = lss.server_ip AND s.port = lss.server_port
+    WHERE s.current_server_name = $1 AND s.current_state IN ('ACTIVE', 'EMPTY');
     """
     
     player_query = """
@@ -221,15 +232,15 @@ async def serverinfo(
             return
 
         # --- Data Extraction ---
-        hostname = server['server_name']
-        map_name = server['map_name'] or 'N/A'
-        num_players = server['player_count']
-        max_players = server['max_players']
+        hostname = server['current_server_name']
+        map_name = server['current_map'] or 'N/A'
+        num_players = server['current_player_count']
+        max_players = server['current_max_players']
         # Use unpure_mods if available, fallback to gametype
-        game_mod = server['unpure_mods'] or server['gametype'] or 'N/A'
-        gametype = server['gametype'] or 'N/A'
+        game_mod = server['unpure_mods'] or server['current_gametype'] or 'N/A'
+        gametype = server['current_gametype'] or 'N/A'
         
-        ip_address = str(server['server_ip'])
+        ip_address = str(server['ip'])
         game_port = server['current_game_port'] or 'N/A'
         full_address = f"{ip_address}:{game_port}"
 
@@ -238,7 +249,7 @@ async def serverinfo(
         time_remaining_formatted = f"{minutes}:{seconds:02d}"
 
         # --- Player Fetching ---
-        all_players = await bot.db_pool.fetch(player_query, server['server_ip'], server['server_port'])
+        all_players = await bot.db_pool.fetch(player_query, server['ip'], server['port'])
         
         # --- Player Sorting (in Python, as we need to split teams) ---
         team1_players = sorted([p for p in all_players if p['team'] == 1], key=lambda x: x.get('score', 0), reverse=True)
@@ -292,14 +303,14 @@ async def find(
 ):
     await ctx.defer(ephemeral=True)
     
-    # --- REFACTORED ---
-    # This is now a single, efficient query instead of a massive loop
+    # --- REFACTORED & FIXED ---
+    # We must join with 'servers' to find active players
     query = """
-    SELECT lss.server_name, lps.score, lps.kills, lps.deaths
+    SELECT s.current_server_name, lps.score, lps.kills, lps.deaths
     FROM live_player_snapshot lps
-    JOIN live_server_snapshot lss ON lps.server_ip = lss.server_ip AND lps.server_port = lss.server_port
-    WHERE lps.player_name = $1 AND lss.status = 'online';
-    """
+    JOIN servers s ON lps.server_ip = s.ip AND lps.server_port = s.port
+    WHERE lps.player_name = $1 AND s.current_state = 'ACTIVE';
+    """ # Note: We only check 'ACTIVE' since an 'EMPTY' server can't have players
 
     try:
         found_player = await bot.db_pool.fetchrow(query, player_name)
@@ -309,7 +320,7 @@ async def find(
                 title=f"🕵️ Player Found: {player_name}",
                 color=discord.Color.blue()
             )
-            embed.add_field(name="Server", value=found_player['server_name'], inline=False)
+            embed.add_field(name="Server", value=found_player['current_server_name'], inline=False)
             embed.add_field(name="Score", value=str(found_player['score'] or 0), inline=True)
             embed.add_field(name="Kills", value=str(found_player['kills'] or 0), inline=True)
             embed.add_field(name="Deaths", value=str(found_player['deaths'] or 0), inline=True)
@@ -325,12 +336,13 @@ async def find(
 async def seed(ctx: discord.ApplicationContext):
     await ctx.defer(ephemeral=True)
 
-    # --- REFACTORED ---
+    # --- REFACTORED & FIXED ---
+    # We query 'servers' and filter on its player count
     query = """
-    SELECT server_name, map_name, player_count, max_players
-    FROM live_server_snapshot
-    WHERE status = 'online' AND player_count > 0 AND player_count < 6
-    ORDER BY player_count ASC
+    SELECT current_server_name, current_map, current_player_count, current_max_players
+    FROM servers
+    WHERE current_state = 'ACTIVE' AND current_player_count > 0 AND current_player_count < 6
+    ORDER BY current_player_count ASC
     LIMIT 25;
     """
     try:
@@ -346,10 +358,10 @@ async def seed(ctx: discord.ApplicationContext):
             color=discord.Color.dark_green()
         )
         for server in server_list:
-            players = f"{server['player_count']}/{server['max_players']}"
-            map_name = server['map_name']
+            players = f"{server['current_player_count']}/{server['current_max_players']}"
+            map_name = server['current_map']
             embed.add_field(
-                name=f"**{server['server_name']}**",
+                name=f"**{server['current_server_name']}**",
                 value=f"🗺️ Map: **{map_name}** | 👥 Players: **{players}**",
                 inline=False
             )
@@ -368,23 +380,23 @@ async def check_map_changes():
         return
 
     try:
-        # --- REFACTORED ---
+        # --- REFACTORED & FIXED ---
         query = """
-        SELECT server_name, map_name, player_count, max_players
-        FROM live_server_snapshot
-        WHERE status = 'online';
+        SELECT current_server_name, current_map, current_player_count, current_max_players
+        FROM servers
+        WHERE current_state IN ('ACTIVE', 'EMPTY');
         """
         online_servers_rows = await bot.db_pool.fetch(query)
-        online_servers = {s['server_name']: s for s in online_servers_rows}
+        online_servers = {s['current_server_name']: s for s in online_servers_rows}
 
         if not last_known_maps:
             for server_name, server_data in online_servers.items():
-                last_known_maps[server_name] = server_data['map_name']
+                last_known_maps[server_name] = server_data['current_map']
             print("Initial map state has been populated.")
             return
 
         for server_name, server_data in online_servers.items():
-            current_map = server_data['map_name']
+            current_map = server_data['current_map']
             last_map = last_known_maps.get(server_name)
 
             if current_map and last_map != current_map:
@@ -402,7 +414,7 @@ async def check_map_changes():
                     current_map.lower()
                 )
                 
-                player_count = server_data['player_count']
+                player_count = server_data['current_player_count']
                 
                 for sub in subs_to_alert:
                     if player_count > sub.get("players_over", 0):
@@ -413,7 +425,7 @@ async def check_map_changes():
                                 description=f"The map **{current_map}** has just started on **{server_name}**!",
                                 color=discord.Color.gold()
                             )
-                            embed.add_field(name="Players", value=f"{player_count}/{server_data['max_players']}")
+                            embed.add_field(name="Players", value=f"{player_count}/{server_data['current_max_players']}")
                             await user.send(embed=embed)
                         except discord.Forbidden:
                             print(f"Could not send DM to user {sub['user_id']}. They may have DMs disabled.")
@@ -422,7 +434,7 @@ async def check_map_changes():
 
         # Update last_known_maps state
         for server_name, server_data in online_servers.items():
-            last_known_maps[server_name] = server_data['map_name']
+            last_known_maps[server_name] = server_data['current_map']
             
     except Exception as e:
         print(f"Error in background task: {e}")
