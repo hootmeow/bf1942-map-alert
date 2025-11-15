@@ -1,30 +1,3 @@
-# main.py
-import asyncio
-from engine.scheduler import Scheduler
-from engine.database import Database  # Import the Database class
-
-async def main():
-    """Main function to start the ingestion engine."""
-    # Create the database manager instance here
-    db_manager = Database()
-    
-    # "Inject" the instance into the scheduler when you create it
-    scheduler = Scheduler(db_manager)
-    
-    try:
-        await scheduler.run()
-    except asyncio.CancelledError:
-        print("Scheduler run cancelled.")
-    finally:
-        # Use the instance to disconnect
-        await db_manager.disconnect()
-        print("Application shutdown complete.")
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\nShutdown requested by user.")
 import discord
 from discord.ext import commands, tasks
 from discord.commands import Option, permissions
@@ -33,6 +6,8 @@ import os
 from dotenv import load_dotenv
 import re
 import asyncio
+import datetime
+import pytz # --- NEW IMPORT ---
 
 # --- CONFIGURATION ---
 load_dotenv()
@@ -104,108 +79,29 @@ async def search_gametypes(ctx: discord.AutocompleteContext):
         print(f"Error in search_gametypes: {e}")
         return []
 
-
-# --- DISCORD COMMANDS ---
-@bot.slash_command(name="subscribe", description="Get an alert when a map starts on a server.")
-async def subscribe(
-    ctx: discord.ApplicationContext,
-    server: Option(str, "Start typing the server name", autocomplete=search_servers),
-    map_name: Option(str, "Start typing the map name", autocomplete=search_maps),
-    players_over: Option(int, "Optional: Only alert if player count is over this number", required=False, default=0),
-    channel: Option(discord.TextChannel, "Optional: The channel to post the alert in (posts to DMs if empty)", required=False, default=None)
-):
+# --- NEW TIMEZONE AUTOCOMPLETE ---
+async def search_timezones(ctx: discord.AutocompleteContext):
+    """Provides suggestions for timezones."""
+    value = ctx.value.lower().replace(" ", "_")
     
-    channel_id = channel.id if channel else None
+    # Give some common, easy-to-type suggestions
+    common_zones = [
+        "UTC", "US/Eastern", "US/Central", "US/Mountain", "US/Pacific",
+        "Europe/London", "Europe/Berlin", "Europe/Moscow",
+        "Australia/Sydney"
+    ]
     
-    if channel:
-        perms = channel.permissions_for(ctx.guild.me)
-        if not perms.send_messages or not perms.embed_links:
-            await ctx.respond(
-                f"❌ I don't have permission to **Send Messages** and **Embed Links** in {channel.mention}."
-                " Please update my permissions and try again.",
-                ephemeral=True
-            )
-            return
+    # Search all pytz timezones
+    if len(value) < 2:
+        return [tz for tz in common_zones if value in tz.lower()][:25]
 
-    query = """
-    INSERT INTO subscriptions (user_id, server_name, map_name, players_over, guild_id, channel_id, is_paused)
-    VALUES ($1, $2, $3, $4, $5, $6, false)
-    ON CONFLICT (user_id, server_name, map_name)
-    DO UPDATE SET
-        players_over = EXCLUDED.players_over,
-        guild_id = EXCLUDED.guild_id,
-        channel_id = EXCLUDED.channel_id,
-        is_paused = false;
-    """
-    try:
-        await bot.db_pool.execute(
-            query,
-            ctx.author.id,
-            server,
-            map_name.lower(),
-            players_over,
-            ctx.guild.id,
-            channel_id
-        )
-        
-        destination = f"channel **{channel.name}**" if channel else "your **DMs**"
-        await ctx.respond(
-            f"✅ You are now subscribed to **{map_name}** on **{server}**.\n"
-            f"Alerts will be sent to {destination}.", 
-            ephemeral=True
-        )
-    except Exception as e:
-        print(f"Error in /subscribe: {e}")
-        await ctx.respond("Something went wrong, I couldn't save your subscription.", ephemeral=True)
+    all_matches = [tz for tz in pytz.all_timezones if value in tz.lower()][:25]
+    return all_matches
 
 
-@bot.slash_command(name="list", description="See all of your current map alerts.")
-async def list_subscriptions(ctx: discord.ApplicationContext):
-    
-    query = "SELECT server_name, map_name, players_over, channel_id, is_paused FROM subscriptions WHERE user_id = $1"
-    try:
-        user_subs = await bot.db_pool.fetch(query, ctx.author.id)
-        if not user_subs:
-            await ctx.respond("You have no active subscriptions.", ephemeral=True)
-            return
+# --- DISCORD COMMANDS (RE-ORDERED) ---
 
-        embed = discord.Embed(title="Your Map Alert Subscriptions", color=discord.Color.blue())
-        description = ""
-        for sub in user_subs:
-            player_condition = f" (Players > {sub['players_over']})" if sub.get('players_over', 0) > 0 else ""
-            
-            destination = "-> DMs"
-            if sub['channel_id']:
-                channel = bot.get_channel(sub['channel_id'])
-                channel_name = f"#{channel.name}" if channel else f"Unknown Channel ({sub['channel_id']})"
-                destination = f"-> {channel_name}"
-            
-            map_name = sub['map_name']
-            if map_name == SERVER_SUB_MAP_NAME:
-                map_display = "**Any Map**"
-            else:
-                map_display = f"**{map_name}**"
-
-            paused_status = " (PAUSED)" if sub['is_paused'] else ""
-                
-            description += f"**{sub['server_name']}** -> {map_display}{player_condition} {destination}{paused_status}\n"
-            
-        embed.description = description
-        await ctx.respond(embed=embed, ephemeral=True)
-    except Exception as e:
-        print(f"Error in /list: {e}")
-        await ctx.respond("Something went wrong, I couldn't fetch your subscriptions.", ephemeral=True)
-
-
-@bot.slash_command(name="unsubscribe", description="Removes all of your active map alerts.")
-async def unsubscribe(ctx: discord.ApplicationContext):
-    try:
-        status = await bot.db_pool.execute("DELETE FROM subscriptions WHERE user_id = $1", ctx.author.id)
-        deleted_count = int(status.split(' ')[1])
-        await ctx.respond(f"🗑️ All {deleted_count} of your subscriptions have been removed.", ephemeral=True)
-    except Exception as e:
-        print(f"Error in /unsubscribe: {e}")
-        await ctx.respond("Something went wrong, I couldn't remove your subscriptions.", ephemeral=True)
+# --- GROUP 1: SERVER & PLAYER INFO ---
 
 @bot.slash_command(name="servers", description="See a live list of active BF1942 servers.")
 async def servers(ctx: discord.ApplicationContext):
@@ -269,6 +165,120 @@ async def playing(
     except Exception as e:
         print(f"Error in /playing: {e}")
         await ctx.followup.send("Something went wrong, I couldn't find servers for that map.", ephemeral=True)
+
+
+@bot.slash_command(name="findgametype", description="Find servers running a specific gametype.")
+async def findgametype(
+    ctx: discord.ApplicationContext,
+    gametype: Option(str, "Start typing the gametype name", autocomplete=search_gametypes)
+):
+    await ctx.defer(ephemeral=True)
+
+    query = """
+    SELECT
+        current_server_name, current_map, current_player_count, current_max_players
+    FROM servers
+    WHERE
+        current_state IN ('ACTIVE', 'EMPTY')
+        AND current_gametype ILIKE $1
+    ORDER BY
+        current_player_count DESC
+    LIMIT 25;
+    """
+    
+    try:
+        server_list = await bot.db_pool.fetch(query, gametype)
+
+        if not server_list:
+            await ctx.followup.send(f"Sorry, no online servers were found running **{gametype}**.")
+            return
+
+        embed = discord.Embed(title=f"Servers Playing: {gametype}", color=discord.Color.orange())
+        
+        for server in server_list:
+            players = f"{server['current_player_count']}/{server['current_max_players']}"
+            map_name = server['current_map']
+
+            embed.add_field(
+                name=f"**{server['current_server_name']}**",
+                value=f"🗺️ Map: **{map_name}** | 👥 Players: **{players}**",
+                inline=False
+            )
+        await ctx.followup.send(embed=embed)
+        
+    except Exception as e:
+        print(f"Error in /findgametype: {e}")
+        await ctx.followup.send("Something went wrong, I couldn't perform the search.", ephemeral=True)
+
+
+@bot.slash_command(name="find", description="Find which server a specific player is on.")
+async def find(
+    ctx: discord.ApplicationContext,
+    player_name: Option(str, "Enter the full, case-sensitive player name")
+):
+    await ctx.defer(ephemeral=True)
+    
+    query = """
+    SELECT s.current_server_name, lps.score, lps.kills, lps.deaths
+    FROM live_player_snapshot lps
+    JOIN servers s ON lps.server_ip = s.ip AND lps.server_port = s.port
+    WHERE lps.player_name = $1 AND s.current_state = 'ACTIVE';
+    """
+    try:
+        found_player = await bot.db_pool.fetchrow(query, player_name)
+    
+        if found_player:
+            embed = discord.Embed(
+                title=f"🕵️ Player Found: {player_name}",
+                color=discord.Color.blue()
+            )
+            embed.add_field(name="Server", value=found_player['current_server_name'], inline=False)
+            embed.add_field(name="Score", value=str(found_player['score'] or 0), inline=True)
+            embed.add_field(name="Kills", value=str(found_player['kills'] or 0), inline=True)
+            embed.add_field(name="Deaths", value=str(found_player['deaths'] or 0), inline=True)
+            await ctx.followup.send(embed=embed)
+        else:
+            await ctx.followup.send(f"Could not find a player named **{player_name}** on any active server.")
+    except Exception as e:
+        print(f"Error in /find: {e}")
+        await ctx.followup.send("Something went wrong, I couldn't perform the player search.", ephemeral=True)
+
+
+@bot.slash_command(name="seed", description="Find servers with a low player count to help get a game started.")
+async def seed(ctx: discord.ApplicationContext):
+    await ctx.defer(ephemeral=True)
+
+    query = """
+    SELECT current_server_name, current_map, current_player_count, current_max_players
+    FROM servers
+    WHERE current_state = 'ACTIVE' AND current_player_count > 0 AND current_player_count < 6
+    ORDER BY current_player_count ASC
+    LIMIT 25;
+    """
+    try:
+        server_list = await bot.db_pool.fetch(query)
+
+        if not server_list:
+            await ctx.followup.send("No servers currently need seeding. Try the `/servers` command.")
+            return
+
+        embed = discord.Embed(
+            title="🌱 Servers to Seed",
+            description="These servers have a few players and are perfect to join and get a round started.",
+            color=discord.Color.dark_green()
+        )
+        for server in server_list:
+            players = f"{server['current_player_count']}/{server['current_max_players']}"
+            map_name = server['current_map']
+            embed.add_field(
+                name=f"**{server['current_server_name']}**",
+                value=f"🗺️ Map: **{map_name}** | 👥 Players: **{players}**",
+                inline=False
+            )
+        await ctx.followup.send(embed=embed)
+    except Exception as e:
+        print(f"Error in /seed: {e}")
+        await ctx.followup.send("Something went wrong, I couldn't find servers to seed.", ephemeral=True)
 
 
 @bot.slash_command(name="serverinfo", description="Get detailed live info for a specific server.")
@@ -360,121 +370,60 @@ async def serverinfo(
         print(f"Error in /serverinfo: {e}")
         await ctx.followup.send("Something went wrong, I couldn't fetch that server's info.", ephemeral=True)
 
+# --- GROUP 2: SUBSCRIPTION MANAGEMENT ---
 
-@bot.slash_command(name="find", description="Find which server a specific player is on.")
-async def find(
+@bot.slash_command(name="subscribe", description="Get an alert when a map starts on a server.")
+async def subscribe(
     ctx: discord.ApplicationContext,
-    player_name: Option(str, "Enter the full, case-sensitive player name")
+    server: Option(str, "Start typing the server name", autocomplete=search_servers),
+    map_name: Option(str, "Start typing the map name", autocomplete=search_maps),
+    players_over: Option(int, "Optional: Only alert if player count is over this number", required=False, default=0),
+    channel: Option(discord.TextChannel, "Optional: The channel to post the alert in (posts to DMs if empty)", required=False, default=None)
 ):
-    await ctx.defer(ephemeral=True)
     
-    query = """
-    SELECT s.current_server_name, lps.score, lps.kills, lps.deaths
-    FROM live_player_snapshot lps
-    JOIN servers s ON lps.server_ip = s.ip AND lps.server_port = s.port
-    WHERE lps.player_name = $1 AND s.current_state = 'ACTIVE';
-    """
-    try:
-        found_player = await bot.db_pool.fetchrow(query, player_name)
+    channel_id = channel.id if channel else None
     
-        if found_player:
-            embed = discord.Embed(
-                title=f"🕵️ Player Found: {player_name}",
-                color=discord.Color.blue()
+    if channel:
+        perms = channel.permissions_for(ctx.guild.me)
+        if not perms.send_messages or not perms.embed_links:
+            await ctx.respond(
+                f"❌ I don't have permission to **Send Messages** and **Embed Links** in {channel.mention}."
+                " Please update my permissions and try again.",
+                ephemeral=True
             )
-            embed.add_field(name="Server", value=found_player['current_server_name'], inline=False)
-            embed.add_field(name="Score", value=str(found_player['score'] or 0), inline=True)
-            embed.add_field(name="Kills", value=str(found_player['kills'] or 0), inline=True)
-            embed.add_field(name="Deaths", value=str(found_player['deaths'] or 0), inline=True)
-            await ctx.followup.send(embed=embed)
-        else:
-            await ctx.followup.send(f"Could not find a player named **{player_name}** on any active server.")
-    except Exception as e:
-        print(f"Error in /find: {e}")
-        await ctx.followup.send("Something went wrong, I couldn't perform the player search.", ephemeral=True)
-
-
-@bot.slash_command(name="findgametype", description="Find servers running a specific gametype.")
-async def findgametype(
-    ctx: discord.ApplicationContext,
-    gametype: Option(str, "Start typing the gametype name", autocomplete=search_gametypes)
-):
-    await ctx.defer(ephemeral=True)
-
-    query = """
-    SELECT
-        current_server_name, current_map, current_player_count, current_max_players
-    FROM servers
-    WHERE
-        current_state IN ('ACTIVE', 'EMPTY')
-        AND current_gametype ILIKE $1
-    ORDER BY
-        current_player_count DESC
-    LIMIT 25;
-    """
-    
-    try:
-        server_list = await bot.db_pool.fetch(query, gametype)
-
-        if not server_list:
-            await ctx.followup.send(f"Sorry, no online servers were found running **{gametype}**.")
             return
 
-        embed = discord.Embed(title=f"Servers Playing: {gametype}", color=discord.Color.orange())
-        
-        for server in server_list:
-            players = f"{server['current_player_count']}/{server['current_max_players']}"
-            map_name = server['current_map']
-
-            embed.add_field(
-                name=f"**{server['current_server_name']}**",
-                value=f"🗺️ Map: **{map_name}** | 👥 Players: **{players}**",
-                inline=False
-            )
-        await ctx.followup.send(embed=embed)
-        
-    except Exception as e:
-        print(f"Error in /findgametype: {e}")
-        await ctx.followup.send("Something went wrong, I couldn't perform the search.", ephemeral=True)
-
-
-@bot.slash_command(name="seed", description="Find servers with a low player count to help get a game started.")
-async def seed(ctx: discord.ApplicationContext):
-    await ctx.defer(ephemeral=True)
-
     query = """
-    SELECT current_server_name, current_map, current_player_count, current_max_players
-    FROM servers
-    WHERE current_state = 'ACTIVE' AND current_player_count > 0 AND current_player_count < 6
-    ORDER BY current_player_count ASC
-    LIMIT 25;
+    INSERT INTO subscriptions (user_id, server_name, map_name, players_over, guild_id, channel_id, is_paused)
+    VALUES ($1, $2, $3, $4, $5, $6, false)
+    ON CONFLICT (user_id, server_name, map_name)
+    DO UPDATE SET
+        players_over = EXCLUDED.players_over,
+        guild_id = EXCLUDED.guild_id,
+        channel_id = EXCLUDED.channel_id,
+        is_paused = false;
     """
     try:
-        server_list = await bot.db_pool.fetch(query)
-
-        if not server_list:
-            await ctx.followup.send("No servers currently need seeding. Try the `/servers` command.")
-            return
-
-        embed = discord.Embed(
-            title="🌱 Servers to Seed",
-            description="These servers have a few players and are perfect to join and get a round started.",
-            color=discord.Color.dark_green()
+        await bot.db_pool.execute(
+            query,
+            ctx.author.id,
+            server,
+            map_name.lower(),
+            players_over,
+            ctx.guild.id,
+            channel_id
         )
-        for server in server_list:
-            players = f"{server['current_player_count']}/{server['current_max_players']}"
-            map_name = server['current_map']
-            embed.add_field(
-                name=f"**{server['current_server_name']}**",
-                value=f"🗺️ Map: **{map_name}** | 👥 Players: **{players}**",
-                inline=False
-            )
-        await ctx.followup.send(embed=embed)
+        
+        destination = f"channel **{channel.name}**" if channel else "your **DMs**"
+        await ctx.respond(
+            f"✅ You are now subscribed to **{map_name}** on **{server}**.\n"
+            f"Alerts will be sent to {destination}.", 
+            ephemeral=True
+        )
     except Exception as e:
-        print(f"Error in /seed: {e}")
-        await ctx.followup.send("Something went wrong, I couldn't find servers to seed.", ephemeral=True)
+        print(f"Error in /subscribe: {e}")
+        await ctx.respond("Something went wrong, I couldn't save your subscription.", ephemeral=True)
 
-# --- NEW COMMANDS ---
 
 @bot.slash_command(name="subscribe_server", description="Get an alert for *every* map change on a server.")
 async def subscribe_server(
@@ -528,6 +477,55 @@ async def subscribe_server(
         await ctx.respond("Something went wrong, I couldn't save your subscription.", ephemeral=True)
 
 
+@bot.slash_command(name="list", description="See all of your current map alerts.")
+async def list_subscriptions(ctx: discord.ApplicationContext):
+    
+    query = "SELECT server_name, map_name, players_over, channel_id, is_paused FROM subscriptions WHERE user_id = $1"
+    try:
+        user_subs = await bot.db_pool.fetch(query, ctx.author.id)
+        if not user_subs:
+            await ctx.respond("You have no active subscriptions.", ephemeral=True)
+            return
+
+        embed = discord.Embed(title="Your Map Alert Subscriptions", color=discord.Color.blue())
+        description = ""
+        for sub in user_subs:
+            player_condition = f" (Players > {sub['players_over']})" if sub.get('players_over', 0) > 0 else ""
+            
+            destination = "-> DMs"
+            if sub['channel_id']:
+                channel = bot.get_channel(sub['channel_id'])
+                channel_name = f"#{channel.name}" if channel else f"Unknown Channel ({sub['channel_id']})"
+                destination = f"-> {channel_name}"
+            
+            map_name = sub['map_name']
+            if map_name == SERVER_SUB_MAP_NAME:
+                map_display = "**Any Map**"
+            else:
+                map_display = f"**{map_name}**"
+
+            paused_status = " (PAUSED)" if sub['is_paused'] else ""
+                
+            description += f"**{sub['server_name']}** -> {map_display}{player_condition} {destination}{paused_status}\n"
+            
+        embed.description = description
+        await ctx.respond(embed=embed, ephemeral=True)
+    except Exception as e:
+        print(f"Error in /list: {e}")
+        await ctx.respond("Something went wrong, I couldn't fetch your subscriptions.", ephemeral=True)
+
+
+@bot.slash_command(name="unsubscribe", description="Removes all of your active map alerts.")
+async def unsubscribe(ctx: discord.ApplicationContext):
+    try:
+        status = await bot.db_pool.execute("DELETE FROM subscriptions WHERE user_id = $1", ctx.author.id)
+        deleted_count = int(status.split(' ')[1])
+        await ctx.respond(f"🗑️ All {deleted_count} of your subscriptions have been removed.", ephemeral=True)
+    except Exception as e:
+        print(f"Error in /unsubscribe: {e}")
+        await ctx.respond("Something went wrong, I couldn't remove your subscriptions.", ephemeral=True)
+
+
 @bot.slash_command(name="pause_alerts", description="Temporarily pause or unpause all of your map alerts.")
 async def pause_alerts(
     ctx: discord.ApplicationContext,
@@ -554,13 +552,152 @@ async def pause_alerts(
         print(f"Error in /pause_alerts: {e}")
         await ctx.respond("Something went wrong, I couldn't update your subscriptions.", ephemeral=True)
 
+# --- GROUP 3: DND MANAGEMENT (NEW) ---
+
+# Helper dicts for DND
+DAY_MAP = {
+    "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6
+}
+DAY_NAMES = [ "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" ]
+
+# Create a DND command group
+dnd = bot.create_group("dnd", "Manage your Do Not Disturb (DND) schedule.")
+
+@dnd.command(name="set", description="Set a DND schedule to block alerts.")
+async def dnd_set(
+    ctx: discord.ApplicationContext,
+    start_hour: Option(int, "Start hour (0-23)", min_value=0, max_value=23),
+    end_hour: Option(int, "End hour (0-23)", min_value=0, max_value=23),
+    days: Option(str, "Days (e.g., 'weekdays', 'weekends', 'all', or 'mon,wed,fri')"),
+    timezone: Option(str, "Your local timezone", autocomplete=search_timezones)
+):
+    await ctx.defer(ephemeral=True)
+
+    # 1. Validate Timezone
+    try:
+        user_tz = pytz.timezone(timezone)
+    except pytz.UnknownTimeZoneError:
+        await ctx.followup.send(f"❌ Unknown timezone: `{timezone}`. Please use the autocomplete to find a valid name (e.g., `US/Eastern`).")
+        return
+
+    # 2. Parse Days
+    days_lower = days.lower()
+    day_list = []
+    if days_lower == "all":
+        day_list = [0, 1, 2, 3, 4, 5, 6]
+    elif days_lower == "weekdays":
+        day_list = [0, 1, 2, 3, 4]
+    elif days_lower == "weekends":
+        day_list = [5, 6]
+    else:
+        for day_str in days_lower.split(','):
+            day_str = day_str.strip()
+            if day_str in DAY_MAP:
+                day_list.append(DAY_MAP[day_str])
+            else:
+                await ctx.followup.send(f"❌ Invalid day: `{day_str}`. Must be `all`, `weekdays`, `weekends`, or a list like `mon,tue,sun`.")
+                return
+    
+    if not day_list:
+        await ctx.followup.send("❌ You must provide at least one valid day.")
+        return
+    
+    # 3. Convert times to UTC
+    # Create a "dummy" date in the user's timezone to do the conversion
+    now_local = datetime.datetime.now(user_tz)
+    
+    start_local = now_local.replace(hour=start_hour, minute=0, second=0, microsecond=0)
+    end_local = now_local.replace(hour=end_hour, minute=0, second=0, microsecond=0)
+
+    start_utc = start_local.astimezone(pytz.utc)
+    end_utc = end_local.astimezone(pytz.utc)
+
+    # Get the UTC day list (0-6, Mon-Sun)
+    # This handles the case where "Monday 22:00" for the user is already "Tuesday 02:00" in UTC
+    utc_days = set()
+    for day_offset in range(8): # Check a full week + 1 day
+        test_date = start_local + datetime.timedelta(days=day_offset)
+        if test_date.weekday() in day_list:
+            utc_days.add(test_date.astimezone(pytz.utc).weekday())
+
+    # 4. Save to DB
+    query = """
+    INSERT INTO user_dnd_rules (user_id, start_hour_utc, end_hour_utc, weekdays_utc, timezone)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT (user_id) DO UPDATE SET
+        start_hour_utc = EXCLUDED.start_hour_utc,
+        end_hour_utc = EXCLUDED.end_hour_utc,
+        weekdays_utc = EXCLUDED.weekdays_utc,
+        timezone = EXCLUDED.timezone;
+    """
+    try:
+        await bot.db_pool.execute(query, ctx.author.id, start_utc.hour, end_utc.hour, list(utc_days), timezone)
+        
+        day_names_str = ", ".join([DAY_NAMES[i] for i in day_list])
+        await ctx.followup.send(f"✅ DND schedule set!\n"
+                                f"Alerts will be **blocked** from **{start_hour:02d}:00** to **{end_hour:02d}:00** ({timezone})\n"
+                                f"On these days: **{day_names_str}**")
+    except Exception as e:
+        print(f"Error in /dnd set: {e}")
+        await ctx.followup.send("Something went wrong, I couldn't save your DND schedule.")
+
+
+@dnd.command(name="view", description="Show your current DND schedule.")
+async def dnd_view(ctx: discord.ApplicationContext):
+    await ctx.defer(ephemeral=True)
+    
+    query = "SELECT * FROM user_dnd_rules WHERE user_id = $1"
+    rule = await bot.db_pool.fetchrow(query, ctx.author.id)
+    
+    if not rule:
+        await ctx.followup.send("You do not have a DND schedule set. Use `/dnd set` to create one.")
+        return
+        
+    # Convert UTC hours back to user's local timezone for display
+    try:
+        user_tz = pytz.timezone(rule['timezone'])
+        now_utc = datetime.datetime.now(pytz.utc)
+        
+        start_utc = now_utc.replace(hour=rule['start_hour_utc'], minute=0)
+        end_utc = now_utc.replace(hour=rule['end_hour_utc'], minute=0)
+        
+        start_local = start_utc.astimezone(user_tz)
+        end_local = end_utc.astimezone(user_tz)
+        
+        # Reconstruct the day list
+        # This is a bit complex, but we check which *local* days are affected by the UTC rules
+        local_days = set()
+        for i in range(7): # Check all 7 days
+            if i in rule['weekdays_utc']:
+                local_days.add(DAY_NAMES[i])
+        
+        day_names_str = ", ".join(sorted(list(local_days), key=lambda d: DAY_NAMES.index(d)))
+
+        await ctx.followup.send(f"**Your DND Schedule:**\n"
+                                f"Alerts are **blocked** from **{start_local.hour:02d}:00** to **{end_local.hour:02d}:00** ({rule['timezone']})\n"
+                                f"On these days (in UTC): **{day_names_str}**\n"
+                                f"*(Note: Day conversion is complex. Set your rule again if this looks wrong.)*")
+    except Exception as e:
+        print(f"Error in /dnd view: {e}")
+        await ctx.followup.send("Something went wrong, I couldn't display your schedule.")
+
+
+@dnd.command(name="clear", description="Clear your DND schedule.")
+async def dnd_clear(ctx: discord.ApplicationContext):
+    query = "DELETE FROM user_dnd_rules WHERE user_id = $1"
+    status = await bot.db_pool.execute(query, ctx.author.id)
+    
+    if status == "DELETE 0":
+        await ctx.respond("You had no DND schedule to clear.", ephemeral=True)
+    else:
+        await ctx.respond("✅ Your DND schedule has been cleared. You will now receive all alerts.", ephemeral=True)
+
+# --- GROUP 4: BOT STATISTICS ---
 
 @bot.slash_command(name="alert_stats", description="See which maps and servers are most popular.")
-# --- PERMISSION CHECK REMOVED ---
 async def alert_stats(ctx: discord.ApplicationContext):
     """Shows statistics about bot subscriptions."""
     
-    # --- NOW SETTING ephemeral=False ---
     await ctx.defer(ephemeral=False) 
 
     map_query = """
@@ -606,19 +743,21 @@ async def alert_stats(ctx: discord.ApplicationContext):
 
     except Exception as e:
         print(f"Error in /alert_stats: {e}")
-        # --- UPDATED ERROR MESSAGE ---
         await ctx.followup.send("Something went wrong, I couldn't fetch the stats.", ephemeral=True)
 
-# --- ERROR HANDLER REMOVED ---      
 
-
-# --- BACKGROUND TASK FOR ALERTS ---
+# --- BACKGROUND TASK FOR ALERTS (UPDATED) ---
 @tasks.loop(seconds=45)
 async def check_map_changes():
     global last_known_maps
     if not bot.db_pool:
         print("Database pool not ready, skipping map check.")
         return
+        
+    # Get current UTC time, hour, and weekday
+    now_utc = datetime.datetime.now(pytz.utc)
+    current_utc_hour = now_utc.hour
+    current_utc_weekday = now_utc.weekday() # 0 = Mon, 6 = Sun
 
     try:
         query = """
@@ -642,13 +781,17 @@ async def check_map_changes():
             if current_map and last_map != current_map:
                 print(f"MAP CHANGE DETECTED on {server_name}: {last_map} -> {current_map}")
                 
+                # --- QUERY UPDATED TO JOIN DND RULES ---
                 subscription_query = """
-                SELECT user_id, players_over, channel_id, map_name
-                FROM subscriptions
+                SELECT 
+                    s.user_id, s.players_over, s.channel_id, s.map_name,
+                    dnd.start_hour_utc, dnd.end_hour_utc, dnd.weekdays_utc
+                FROM subscriptions s
+                LEFT JOIN user_dnd_rules dnd ON s.user_id = dnd.user_id
                 WHERE 
-                    server_name = $1
-                    AND is_paused = false
-                    AND (map_name = $2 OR map_name = $3);
+                    s.server_name = $1
+                    AND s.is_paused = false
+                    AND (s.map_name = $2 OR s.map_name = $3);
                 """
                 subs_to_alert = await bot.db_pool.fetch(
                     subscription_query,
@@ -660,46 +803,70 @@ async def check_map_changes():
                 player_count = server_data['current_player_count']
                 
                 for sub in subs_to_alert:
-                    if player_count > sub.get("players_over", 0):
+                    if player_count <= sub.get("players_over", 0):
+                        continue # Skip for player count
+                    
+                    # --- NEW DND CHECK ---
+                    if sub['start_hour_utc'] is not None:
+                        is_dnd_day = current_utc_weekday in sub['weekdays_utc']
                         
-                        if sub['map_name'] == SERVER_SUB_MAP_NAME:
-                            title = "📢 BF1942 Server Alert!"
-                            description = f"**{server_name}** has just changed maps to **{current_map}**!"
+                        # Check if current hour is in the DND range
+                        # This logic handles "overnight" ranges (e.g., 22:00 to 06:00)
+                        start_h = sub['start_hour_utc']
+                        end_h = sub['end_hour_utc']
+                        is_dnd_hour = False
+                        
+                        if start_h <= end_h:
+                            # Simple range (e.g., 09:00 to 17:00)
+                            is_dnd_hour = start_h <= current_utc_hour < end_h
                         else:
-                            title = "📢 BF1942 Map Alert!"
-                            description = f"The map **{current_map}** has just started on **{server_name}**!"
+                            # Overnight range (e.g., 22:00 to 06:00)
+                            is_dnd_hour = current_utc_hour >= start_h or current_utc_hour < end_h
                         
-                        embed = discord.Embed(
-                            title=title,
-                            description=description,
-                            color=discord.Color.gold()
-                        )
-                        embed.add_field(name="Players", value=f"{player_count}/{server_data['current_max_players']}")
-                        
-                        channel_id = sub.get("channel_id")
-                        
-                        if channel_id:
-                            try:
-                                channel = bot.get_channel(channel_id)
-                                if channel:
-                                    perms = channel.permissions_for(channel.guild.me)
-                                    if perms.send_messages and perms.embed_links:
-                                        await channel.send(embed=embed)
-                                    else:
-                                        print(f"PERMISSION ERROR: Bot lacks 'Send Messages' or 'Embed Links' for channel {channel_id}.")
+                        if is_dnd_day and is_dnd_hour:
+                            print(f"Skipping alert for user {sub['user_id']} due to DND.")
+                            continue # Skip alert, user is in DND
+                    
+                    # --- End DND Check ---
+
+                    if sub['map_name'] == SERVER_SUB_MAP_NAME:
+                        title = "📢 BF1942 Server Alert!"
+                        description = f"**{server_name}** has just changed maps to **{current_map}**!"
+                    else:
+                        title = "📢 BF1942 Map Alert!"
+                        description = f"The map **{current_map}** has just started on **{server_name}**!"
+                    
+                    embed = discord.Embed(
+                        title=title,
+                        description=description,
+                        color=discord.Color.gold()
+                    )
+                    embed.add_field(name="Players", value=f"{player_count}/{server_data['current_max_players']}")
+                    
+                    channel_id = sub.get("channel_id")
+                    
+                    if channel_id:
+                        try:
+                            channel = bot.get_channel(channel_id)
+                            if channel:
+                                perms = channel.permissions_for(channel.guild.me)
+                                if perms.send_messages and perms.embed_links:
+                                    await channel.send(embed=embed)
                                 else:
-                                    print(f"ERROR: Could not find channel with ID {channel_id}. Maybe it was deleted?")
-                            except Exception as e:
-                                print(f"An error occurred sending a channel alert: {e}")
-                        
-                        else:
-                            try:
-                                user = await bot.fetch_user(sub["user_id"])
-                                await user.send(embed=embed)
-                            except discord.Forbidden:
-                                print(f"Could not send DM to user {sub['user_id']}. They may have DMs disabled.")
-                            except Exception as e:
-                                print(f"An error occurred sending a DM: {e}")
+                                    print(f"PERMISSION ERROR: Bot lacks 'Send Messages' or 'Embed Links' for channel {channel_id}.")
+                            else:
+                                print(f"ERROR: Could not find channel with ID {channel_id}. Maybe it was deleted?")
+                        except Exception as e:
+                            print(f"An error occurred sending a channel alert: {e}")
+                    
+                    else:
+                        try:
+                            user = await bot.fetch_user(sub["user_id"])
+                            await user.send(embed=embed)
+                        except discord.Forbidden:
+                            print(f"Could not send DM to user {sub['user_id']}. They may have DMs disabled.")
+                        except Exception as e:
+                            print(f"An error occurred sending a DM: {e}")
 
         # Update last_known_maps state
         for server_name, server_data in online_servers.items():
