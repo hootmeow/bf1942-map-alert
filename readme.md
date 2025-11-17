@@ -1,206 +1,92 @@
-\# BF1942 Map Alert Bot
+# BF1942 Map Alert Bot
 
-
-
-\## Overview
-
-
+## Overview
 
 This is a high-performance, asynchronous Discord bot built with `py-cord` and `asyncpg`. It connects directly to a live Battlefield 1942 statistics database (PostgreSQL) to provide real-time server information, player tracking, and map change alerts to a Discord community.
 
-
-
 The bot is driven by slash commands and features a background task that periodically checks for map changes to send alerts.
 
+## Core Features
 
+* **Map Change Alerts:** Users can subscribe to alerts for a specific map on a server or all map changes on a server.
+* **Flexible Alerts:** Alerts can be sent via DM or posted in a designated server channel.
+* **Live Server Browser:** Users can browse all online servers, find servers by map or gametype, and find servers that need seeding.
+* **Detailed Statistics:** Users can get a deep, live "scoreboard" view of any server, including player lists, scores, and ticket counts.
+* **Player Finder:** Users can locate which server a specific player is currently on.
+* **Subscription Management:** Users can list, pause, or remove their subscriptions.
+* **Public Stats:** A command shows the community's most-subscribed maps and servers.
 
-\## Core Features
-
-
-
-\* \*\*Map Change Alerts:\*\* Users can subscribe to alerts for a specific map on a server or all map changes on a server.
-
-\* \*\*Flexible Alerts:\*\* Alerts can be sent via DM or posted in a designated server channel.
-
-\* \*\*Live Server Browser:\*\* Users can browse all online servers, find servers by map or gametype, and find servers that need seeding.
-
-\* \*\*Detailed Statistics:\*\* Users can get a deep, live "scoreboard" view of any server, including player lists, scores, and ticket counts.
-
-\* \*\*Player Finder:\*\* Users can locate which server a specific player is currently on.
-
-\* \*\*Subscription Management:\*\* Users can list, pause, or remove their subscriptions.
-
-\* \*\*Public Stats:\*\* A command shows the community's most-subscribed maps and servers.
-
-
-
-\## Application Structure
-
-
+## Application Structure
 
 The bot's logic is contained in a few key files:
 
+* **`bot.py`**: Main application file. It contains all logic for:
+    * Connecting to the PostgreSQL database (`asyncpg.create_pool`).
+    * Connecting to Discord (`bot.run`).
+    * Defining all slash commands (e.g., `@bot.slash_command`).
+    * Defining autocomplete functions (`search_servers`, `search_maps`, etc.).
+    * Running the background task (`@tasks.loop`) to check for map changes.
 
+* **`.env`**: Stores configuration secrets (not included in the repository).
+    * `DISCORD_TOKEN`: Bot token.
+    * `POSTGRES_DSN`: PostgreSQL connection string (e.g., `postgres://user:pass@host:port/db`).
 
-\* \*\*`bot.py`\*\*: This is the main application file. It contains all logic for:
+* **`requirements.txt`**: Lists required Python libraries.
+    * `py-cord`
+    * `python-dotenv`
+    * `asyncpg`
 
-&nbsp;   \* Connecting to the PostgreSQL database (`asyncpg.create\_pool`).
+## Database Interaction
 
-&nbsp;   \* Connecting to Discord (`bot.run`).
+The bot relies on read-access to the bf1942.online Battlefield 1942 statistics database and write-access to one table of its own. It will not work stand-alone.
 
-&nbsp;   \* Defining all slash commands (e.g., `@bot.slash\_command`).
+## Command Reference
 
-&nbsp;   \* Defining all autocomplete functions (`search\_servers`, `search\_maps`, etc.).
+### Subscription Commands
 
-&nbsp;   \* Running the background task (`@tasks.loop`) to check for map changes.
+* **`/subscribe`**
+    * **Description:** Subscribes you to an alert for a *specific map* on a *specific server*.
+    * **Options:** `server`, `map_name`, `players_over` (optional), `channel` (optional).
 
-\* \*\*`.env`\*\*: This file (which is not in the repository) stores the configuration secrets.
+* **`/subscribe_server`**
+    * **Description:** Subscribes you to *all map changes* on a specific server.
+    * **Options:** `server`, `players_over` (optional), `channel` (optional).
 
-&nbsp;   \* `DISCORD\_TOKEN`: The bot's Discord token.
+* **`/list`**
+    * **Description:** Shows all of your current subscriptions and their status (paused, channel, DM).
 
-&nbsp;   \* `POSTGRES\_DSN`: The full connection string for the PostgreSQL database (e.g., `postgres://user:pass@host:port/db`).
+* **`/unsubscribe`**
+    * **Description:** Deletes *all* of your active subscriptions.
 
-\* \*\*`requirements.txt`\*\*: Lists the required Python libraries.
+* **`/pause_alerts`**
+    * **Description:** Pauses or unpauses all alerts without deleting them.
+    * **Options:** `status` (pause/unpause).
 
-&nbsp;   \* `py-cord`: The Discord API library.
+### Server Info Commands
 
-&nbsp;   \* `python-dotenv`: For loading the `.env` file.
+* **`/servers`**
+    * **Description:** Shows a live list of all online BF1942 servers, sorted by player count.
 
-&nbsp;   \* `asyncpg`: The asynchronous PostgreSQL driver.
+* **`/playing`**
+    * **Description:** Finds all servers currently playing a specific map.
+    * **Options:** `map_name` (autocomplete).
 
+* **`/findgametype`**
+    * **Description:** Finds all servers running a specific gametype (e.g., Conquest, CTF).
+    * **Options:** `gametype` (autocomplete).
 
+* **`/seed`**
+    * **Description:** Finds servers with a low number of players (1–5) that need help starting.
 
-\## Database Interaction
+### Player & Stats Commands
 
+* **`/serverinfo`**
+    * **Description:** Shows a detailed, live scoreboard for a single server, including teams, tickets, and player stats.
+    * **Options:** `server_name` (autocomplete).
 
+* **`/find`**
+    * **Description:** Finds which server a specific player is currently on.
+    * **Options:** `player_name`.
 
-The bot relies on read-access to a live game statistics database and write-access to one table of its own.
-
-
-
-\### Bot-Owned Table
-
-
-
-The bot's \*only\* write-access requirement is for the `subscriptions` table.
-
-
-
-\* \*\*`subscriptions`\*\*:
-
-&nbsp;   \* \*\*Purpose:\*\* Stores all user alerts.
-
-&nbsp;   \* \*\*Key Columns:\*\*
-
-&nbsp;       \* `user\_id` (BIGINT): The Discord ID of the user.
-
-&nbsp;       \* `server\_name` (VARCHAR): The name of the server to watch.
-
-&nbsp;       \* `map\_name` (VARCHAR): The name of the map to watch. A special value of `\*all\*` is used for `/subscribe\_server` alerts.
-
-&nbsp;       \* `channel\_id` (BIGINT): If `NULL`, the alert is a DM. If it has an ID, the alert is posted to that channel.
-
-&nbsp;       \* `is\_paused` (BOOLEAN): If `true`, the user will not receive alerts for this subscription.
-
-
-
-\### External (Read-Only) Tables
-
-
-
-The bot reads from the following tables to get its live game data:
-
-
-
-\* \*\*`servers`\*\*: The main table for server status. Used to find servers that are `ACTIVE` or `EMPTY`. Provides `current\_server\_name`, `current\_map`, `current\_player\_count`, `current\_gametype`, etc.
-
-\* \*\*`live\_server\_snapshot`\*\*: A detailed snapshot of live server data, including `tickets1`, `tickets2`, `unpure\_mods`, and `round\_time\_remain`.
-
-\* \*\*`live\_player\_snapshot`\*\*: A detailed snapshot of all players currently online, including `player\_name`, `score`, `kills`, `deaths`, `ping`, and `team`.
-
-\* \*\*`rounds`\*\*: A historical log of all completed rounds. Used by the `/search\_maps` autocomplete to get a list of all map names.
-
-
-
-\## Command Reference
-
-
-
-\### Subscription Commands
-
-
-
-\* \*\*`/subscribe`\*\*
-
-&nbsp;   \* \*\*Description:\*\* Subscribes you to an alert for a \*specific map\* on a \*specific server\*.
-
-&nbsp;   \* \*\*Options:\*\* `server`, `map\_name`, `players\_over` (optional), `channel` (optional).
-
-\* \*\*`/subscribe\_server`\*\*
-
-&nbsp;   \* \*\*Description:\*\* Subscribes you to alerts for \*any map change\* on a \*specific server\*.
-
-&nbsp;   \* \*\*Options:\*\* `server`, `players\_over` (optional), `channel` (optional).
-
-\* \*\*`/list`\*\*
-
-&nbsp;   \* \*\*Description:\*\* Shows all of your current map and server subscriptions and their status (paused, channel, DM).
-
-\* \*\*`/unsubscribe`\*\*
-
-&nbsp;   \* \*\*Description:\*\* Deletes \*all\* of your active subscriptions.
-
-\* \*\*`/pause\_alerts`\*\*
-
-&nbsp;   \* \*\*Description:\*\* Pauses or unpauses all of your alerts without deleting them.
-
-&nbsp;   \* \*\*Options:\*\* `status` (pause/unpause).
-
-
-
-\### Server Info Commands
-
-
-
-\* \*\*`/servers`\*\*
-
-&nbsp;   \* \*\*Description:\*\* Shows a live list of all online BF1942 servers, sorted by player count.
-
-\* \*\*`/playing`\*\*
-
-&nbsp;   \* \*\*Description:\*\* Finds all servers currently playing a specific map.
-
-&nbsp;   \* \*\*Options:\*\* `map\_name` (with autocomplete).
-
-\* \*\*`/findgametype`\*\*
-
-&nbsp;   \* \*\*Description:\*\* Finds all servers currently running a specific gametype (e.g., Conquest, CTF).
-
-&nbsp;   \* \*\*Options:\*\* `gametype` (with autocomplete).
-
-\* \*\*`/seed`\*\*
-
-&nbsp;   \* \*\*Description:\*\* Finds servers with a small number of players (1-5) that need help starting.
-
-
-
-\### Player \& Stats Commands
-
-
-
-\* \*\*`/serverinfo`\*\*
-
-&nbsp;   \* \*\*Description:\*\* Shows a detailed, live scoreboard for a single server, including teams, tickets, and player stats.
-
-&nbsp;   \* \*\*Options:\*\* `server\_name` (with autocomplete).
-
-\* \*\*`/find`\*\*
-
-&nbsp;   \* \*\*Description:\*\* Finds which server a specific player is currently on.
-
-&nbsp;   \* \*\*Options:\*\* `player\_name`.
-
-\* \*\*`/alert\_stats`\*\*
-
-&nbsp;   \* \*\*Description:\*\* A public command to see the Top 10 most-subscribed-to maps and servers by the bot's users.
-
+* **`/alert_stats`**
+    * **Description:** Shows the Top 10 most-subscribed maps and servers across the community.
