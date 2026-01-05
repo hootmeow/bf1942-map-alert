@@ -33,28 +33,23 @@ class ServerCommands(commands.Cog):
     def db(self) -> Database:
         return self.bot.db
 
-    @commands.slash_command(name="servers", description="See a live list of active BF1942 servers.")
+    @commands.slash_command(name="servers", description="See a live list of all active BF1942 servers.")
     async def servers(self, ctx: discord.ApplicationContext):
         await ctx.defer(ephemeral=True)
         try:
-            server_list = await self.db.get_all_active_servers()
+            # Fetch ALL active servers (limit 100 or huge number)
+            # Database method default was 25, we'll ask for more
+            server_list = await self.db.get_all_active_servers(limit=500)
+            
             if not server_list:
                 await ctx.followup.send("Could not find any online servers right now.")
                 return
 
-            embed = discord.Embed(
-                title="Live BF1942 Servers",
-                description=f"Showing {len(server_list)} online servers, sorted by player count.",
-                color=discord.Color.green()
-            )
-            for server in server_list:
-                players = f"{server['current_player_count']}/{server['current_max_players']}"
-                embed.add_field(
-                    name=f"**{server['current_server_name']}**",
-                    value=f"🗺️ Map: **{server['current_map']}** | 👥 Players: **{players}**",
-                    inline=False
-                )
-            await ctx.followup.send(embed=embed)
+            # Use our new Pagination View
+            from utils.pagination import ServerPaginationView
+            view = ServerPaginationView(server_list, per_page=10)
+            await ctx.followup.send(embed=view.create_embed(), view=view)
+            
         except Exception as e:
             logger.error(f"Error in /servers: {e}")
             await ctx.followup.send("Something went wrong, I couldn't fetch the server list.", ephemeral=True)
