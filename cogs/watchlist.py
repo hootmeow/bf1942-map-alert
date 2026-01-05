@@ -137,7 +137,8 @@ class Watchlist(commands.Cog):
                         description=f"**{player_name}** just joined **{server_name}**!",
                         color=discord.Color.magenta()
                     )
-                    await user.send(embed=embed)
+                    clean_content = f"Watchlist: {player_name} joined {server_name}"
+                    await user.send(content=clean_content, embed=embed)
                     
                     # Set Cooldown (e.g., 15 minutes)
                     # We don't want to ping again if they rejoin within 15 mins

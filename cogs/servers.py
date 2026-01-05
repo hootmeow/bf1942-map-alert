@@ -167,6 +167,7 @@ class ServerCommands(commands.Cog):
 
             # Embed Creation
             embed = discord.Embed(title=f"**{hostname}**", color=discord.Color.dark_gray())
+            
             embed.add_field(name="🗺️ Map", value=f"`{map_name}`", inline=True)
             embed.add_field(name="👥 Players", value=f"`{num_players}/{max_players}`", inline=True)
             embed.add_field(name="🕹️ Mod", value=f"`{game_mod}`", inline=True)
