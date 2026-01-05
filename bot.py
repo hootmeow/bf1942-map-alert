@@ -35,7 +35,8 @@ class BF1942Bot(commands.Bot):
             "cogs.servers",
             "cogs.subscriptions",
             "cogs.stats",
-            "cogs.general"
+            "cogs.general",
+            "cogs.watchlist"
         ]
         for ext in extensions:
             try:

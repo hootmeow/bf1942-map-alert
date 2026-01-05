@@ -4,89 +4,100 @@
 
 This is a high-performance, asynchronous Discord bot built with `py-cord` and `asyncpg`. It connects directly to a live Battlefield 1942 statistics database (PostgreSQL) to provide real-time server information, player tracking, and map change alerts to a Discord community.
 
-The bot is driven by slash commands and features a background task that periodically checks for map changes to send alerts.
+The bot uses a modern, modular architecture with **Cogs** and a dedicated database abstraction layer.
 
 ## Core Features
 
-* **Map Change Alerts:** Users can subscribe to alerts for a specific map on a server or all map changes on a server.
-* **Flexible Alerts:** Alerts can be sent via DM or posted in a designated server channel.
-* **Live Server Browser:** Users can browse all online servers, find servers by map or gametype, and find servers that need seeding.
-* **Detailed Statistics:** Users can get a deep, live "scoreboard" view of any server, including player lists, scores, and ticket counts.
-* **Player Finder:** Users can locate which server a specific player is currently on.
-* **Subscription Management:** Users can list, pause, or remove their subscriptions.
-* **Public Stats:** A command shows the community's most-subscribed maps and servers.
+*   **🕵️ Player Watchlist:** Get a DM immediately when your friends (or rivals) join a server.
+*   **📡 Live Server Browser:** Browse all active servers using pagination.
+*   **🔔 Map Alerts:** Subscribe to be notified when a specific map comes up.
+*   **📊 Dynamic Status:** The bot's status updates every minute with real-time player counts ("Watching X Players").
+*   **📜 Detailed Scoreboards:** View live scoreboards with neat typography, ticket counts, and copy-paste friendly IP addresses.
+*   **🕒 Do Not Disturb:** Set quiet hours where the bot will hold back notifications.
 
-## Application Structure
+## Architecture
 
-The bot's logic is contained in a few key files:
+The bot has been refactored from a monolithic script into a modular design:
 
-* **`bot.py`**: Main application file. It contains all logic for:
-    * Connecting to the PostgreSQL database (`asyncpg.create_pool`).
-    * Connecting to Discord (`bot.run`).
-    * Defining all slash commands (e.g., `@bot.slash_command`).
-    * Defining autocomplete functions (`search_servers`, `search_maps`, etc.).
-    * Running the background task (`@tasks.loop`) to check for map changes.
+```mermaid
+graph TD
+    Bot[bot.py] -->|Loads| Cogs
+    Bot -->|Connects| DB[core/database.py]
+    
+    subgraph Cogs ["Command Modules"]
+        Servers[cogs/servers.py]
+        Subs[cogs/subscriptions.py]
+        Stats[cogs/stats.py]
+        General[cogs/general.py]
+        Watch[cogs/watchlist.py]
+    end
+    
+    Servers -->|Uses| DB
+    Subs -->|Uses| DB
+    Stats -->|Uses| DB
+    General -->|Uses| DB
+    Watch -->|Uses| DB
+    
+    DB --> PostgreSQL[(PostgreSQL)]
+```
 
-* **`.env`**: Stores configuration secrets (not included in the repository).
-    * `DISCORD_TOKEN`: Bot token.
-    * `POSTGRES_DSN`: PostgreSQL connection string (e.g., `postgres://user:pass@host:port/db`).
+*   **`bot.py`**: Entry point. Loads extensions and connects to DB.
+*   **`core/database.py`**: Centralized SQL query manager.
+*   **`cogs/`**:
+    *   `servers.py`: Browsing, server info, pagination.
+    *   `subscriptions.py`: Map alerts, DND settings.
+    *   `watchlist.py`: Player tracking and anti-spam alerts.
+    *   `stats.py`: Global statistics.
+    *   `general.py`: Dynamic status presence.
 
-* **`requirements.txt`**: Lists required Python libraries.
-    * `py-cord`
-    * `python-dotenv`
-    * `asyncpg`
+## Requirements
 
-## Database Interaction
+*   Python 3.8+
+*   PostgreSQL Database (with BF1942 stats schema)
+*   **Libraries**:
+    *   `py-cord`
+    *   `python-dotenv`
+    *   `asyncpg`
+    *   `pytz`
 
-The bot relies on read-access to the bf1942.online Battlefield 1942 statistics database and write-access to one table of its own. It will not work stand-alone.
+## Setup
+
+1.  **Install Dependencies**:
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+2.  **Environment Variables**:
+    Create a `.env` file:
+    ```env
+    DISCORD_TOKEN=your_bot_token
+    POSTGRES_DSN=postgres://user:pass@host:port/db_name
+    ```
+
+3.  **Run**:
+    ```bash
+    python bot.py
+    ```
 
 ## Command Reference
 
-### Subscription Commands
+### 🕵️ Watchlist (New!)
+*   **/watch `[player]`**: Receive a DM when this player joins any server. (Includes spam protection).
+*   **/unwatch `[player]`**: Stop tracking a player.
+*   **/watchlist**: See who you are currently tracking.
 
-* **`/subscribe`**
-    * **Description:** Subscribes you to an alert for a *specific map* on a *specific server*.
-    * **Options:** `server`, `map_name`, `players_over` (optional), `channel` (optional).
+### 🖥️ Servers
+*   **/servers**: Browse a live list of **all** active servers (supports pagination).
+*   **/serverinfo `[server]`**: View a detailed scoreboard, map info, and get a copy-pasteable IP address.
+*   **/playing `[map]`**: Find servers playing a specific map.
+*   **/seed**: Find servers with low player counts that need help starting.
 
-* **`/subscribe_server`**
-    * **Description:** Subscribes you to *all map changes* on a specific server.
-    * **Options:** `server`, `players_over` (optional), `channel` (optional).
+### 🔔 Alerts & Subscriptions
+*   **/subscribe**: Alert for a specific map on a server.
+*   **/subscribe_server**: Alert for *any* map change on a server.
+*   **/list**: View your active subscriptions.
+*   **/dnd set**: Configure your "Do Not Disturb" hours (UTC).
 
-* **`/list`**
-    * **Description:** Shows all of your current subscriptions and their status (paused, channel, DM).
-
-* **`/unsubscribe`**
-    * **Description:** Deletes *all* of your active subscriptions.
-
-* **`/pause_alerts`**
-    * **Description:** Pauses or unpauses all alerts without deleting them.
-    * **Options:** `status` (pause/unpause).
-
-### Server Info Commands
-
-* **`/servers`**
-    * **Description:** Shows a live list of all online BF1942 servers, sorted by player count.
-
-* **`/playing`**
-    * **Description:** Finds all servers currently playing a specific map.
-    * **Options:** `map_name` (autocomplete).
-
-* **`/findgametype`**
-    * **Description:** Finds all servers running a specific gametype (e.g., Conquest, CTF).
-    * **Options:** `gametype` (autocomplete).
-
-* **`/seed`**
-    * **Description:** Finds servers with a low number of players (1–5) that need help starting.
-
-### Player & Stats Commands
-
-* **`/serverinfo`**
-    * **Description:** Shows a detailed, live scoreboard for a single server, including teams, tickets, and player stats.
-    * **Options:** `server_name` (autocomplete).
-
-* **`/find`**
-    * **Description:** Finds which server a specific player is currently on.
-    * **Options:** `player_name`.
-
-* **`/alert_stats`**
-    * **Description:** Shows the Top 10 most-subscribed maps and servers across the community.
+### 📈 Stats
+*   **/find `[player]`**: See which server a player is on right now.
+*   **/alert_stats**: View global stats on the most popular maps/servers.

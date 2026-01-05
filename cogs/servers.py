@@ -172,32 +172,31 @@ class ServerCommands(commands.Cog):
             embed.add_field(name="🕹️ Mod", value=f"`{game_mod}`", inline=True)
             embed.add_field(name="🚩 Gametype", value=f"`{gametype}`", inline=True)
             embed.add_field(name="⌛ Time Remaining", value=f"`{time_remaining_formatted}`", inline=True)
+            # Use inline code block for easy copy-paste without taking up space
             embed.add_field(name="🔌 Address", value=f"`{full_address}`", inline=True)
+
+            # --- Formatting Helper ---
+            def format_table(players):
+                # Header: Score (7), Kills (7), Deaths (7), Ping (6), Name (Rest)
+                # Max name length increased to 25 to prevent truncation
+                lines = [f"{'Score':<7}{'Kills':<7}{'Deaths':<7}{'Ping':<6}Player"]
+                lines.append("-" * 55) # Extended dash line
+                for p in players[:15]: 
+                    name = p['player_name'] or 'Unknown'
+                    # Truncate slightly longer name if needed (now 25 chars)
+                    lines.append(f"{p['score'] or 0:<7}{p['kills'] or 0:<7}{p['deaths'] or 0:<7}{p['ping'] or 0:<6}{name[:25]}")
+                return "```\n" + "\n".join(lines) + "\n```"
 
             # Team 1
             tickets1 = server['tickets1'] or 'N/A'
             team1_header = f"Axis (Team 1) - Tickets: {tickets1}"
-            team1_body = "```\nScore  Kills  Deaths  Ping  Player\n-----  -----  ------  ----  --------------\n"
-            if not team1_players:
-                team1_body += "No players on this team."
-            else:
-                for p in team1_players[:10]:
-                    player_name = p['player_name'] or 'Unknown'
-                    team1_body += f"{p['score'] or 0:<7}{p['kills'] or 0:<7}{p['deaths'] or 0:<8}{p['ping'] or 0:<6}{player_name[:14]}\n"
-            team1_body += "```"
+            team1_body = "No players on this team." if not team1_players else format_table(team1_players)
             embed.add_field(name=team1_header, value=team1_body, inline=False)
             
             # Team 2
             tickets2 = server['tickets2'] or 'N/A'
             team2_header = f"Allies (Team 2) - Tickets: {tickets2}"
-            team2_body = "```\nScore  Kills  Deaths  Ping  Player\n-----  -----  ------  ----  --------------\n"
-            if not team2_players:
-                team2_body += "No players on this team."
-            else:
-                for p in team2_players[:10]:
-                    player_name = p['player_name'] or 'Unknown'
-                    team2_body += f"{p['score'] or 0:<7}{p['kills'] or 0:<7}{p['deaths'] or 0:<8}{p['ping'] or 0:<6}{player_name[:14]}\n"
-            team2_body += "```"
+            team2_body = "No players on this team." if not team2_players else format_table(team2_players)
             embed.add_field(name=team2_header, value=team2_body, inline=False)
 
             await ctx.followup.send(embed=embed)

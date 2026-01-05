@@ -236,3 +236,65 @@ class Database:
             AND (s.map_name = $2 OR s.map_name = $3);
         """
         return await self.fetch(sql, server_name, map_name, server_sub_map_name)
+
+    # --- Watchlist Queries ---
+
+    async def add_watchlist(self, user_id: int, player_name: str):
+        """Adds a player to the user's watchlist."""
+        # Using a new table 'player_watchlist'
+        # We need to ensure this table exists. 
+        # For this exercise, I will assume we can create it or it exists.
+        # IF IT DOES NOT EXIST, THIS WILL FAIL. 
+        # Ideally, we should have a schema migration. 
+        # I will create a method to init the table just in case.
+        sql = """
+        INSERT INTO player_watchlist (user_id, player_name)
+        VALUES ($1, $2)
+        ON CONFLICT (user_id, player_name) DO NOTHING;
+        """
+        await self.execute(sql, user_id, player_name)
+
+    async def remove_watchlist(self, user_id: int, player_name: str) -> int:
+        sql = "DELETE FROM player_watchlist WHERE user_id = $1 AND player_name = $2"
+        status = await self.execute(sql, user_id, player_name)
+        return int(status.split(' ')[1])
+
+    async def get_user_watchlist(self, user_id: int) -> List[asyncpg.Record]:
+        sql = "SELECT player_name FROM player_watchlist WHERE user_id = $1"
+        return await self.fetch(sql, user_id)
+
+    async def get_watchlist_subscribers(self, player_names: List[str]) -> List[asyncpg.Record]:
+        """Finds users watching any of the given players."""
+        sql = """
+        SELECT 
+            w.user_id, w.player_name,
+            dnd.start_hour_utc, dnd.end_hour_utc, dnd.weekdays_utc
+        FROM player_watchlist w
+        LEFT JOIN user_dnd_rules dnd ON w.user_id = dnd.user_id
+        WHERE w.player_name = ANY($1::text[]);
+        """
+        return await self.fetch(sql, player_names)
+    
+    async def get_all_online_players(self) -> List[asyncpg.Record]:
+        """Fetches every player currently online across all active servers."""
+        sql = """
+        SELECT lps.player_name, s.current_server_name
+        FROM live_player_snapshot lps
+        JOIN servers s ON lps.server_ip = s.ip AND lps.server_port = s.port
+        WHERE s.current_state = 'ACTIVE';
+        """
+        return await self.fetch(sql)
+    
+    async def init_watchlist_table(self):
+        """Creates the watchlist table if it doesn't exist."""
+        sql = """
+        CREATE TABLE IF NOT EXISTS player_watchlist (
+            user_id BIGINT,
+            player_name TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            PRIMARY KEY (user_id, player_name)
+        );
+        """
+        await self.execute(sql)
+
+
