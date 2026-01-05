@@ -2,7 +2,7 @@
 
 ## Overview
 
-This is a high-performance, asynchronous Discord bot built with `py-cord` and `asyncpg`. It connects directly to a live Battlefield 1942 statistics database (PostgreSQL) to provide real-time server information, player tracking, and map change alerts to a Discord community.
+This is a high-performance, asynchronous Discord bot built with `py-cord` and `asyncpg`. It connects directly to the bf1942.online statistics database (PostgreSQL) to provide real-time server information, player tracking, and map change alerts to a Discord community.
 
 The bot uses a modern, modular architecture with **Cogs** and a dedicated database abstraction layer.
 
@@ -17,7 +17,7 @@ The bot uses a modern, modular architecture with **Cogs** and a dedicated databa
 
 ## Architecture
 
-The bot has been refactored from a monolithic script into a modular design:
+The bot utilizes a modular design:
 
 ```mermaid
 graph TD
@@ -81,7 +81,7 @@ graph TD
 
 ## Command Reference
 
-### 🕵️ Watchlist (New!)
+### 🕵️ Watchlist
 *   **/watch `[player]`**: Receive a DM when this player joins any server. (Includes spam protection).
 *   **/unwatch `[player]`**: Stop tracking a player.
 *   **/watchlist**: See who you are currently tracking.
