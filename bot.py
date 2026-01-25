@@ -73,23 +73,31 @@ if __name__ == "__main__":
             
         bot = BF1942Bot()
 
-        # --- GLOBAL USER BLOCK ---
+        # --- GLOBAL RESTRICTIONS (Users & Servers) ---
         @bot.check
-        async def global_user_block(ctx):
-            # Add the IDs of the users you want to block here
+        async def global_restrictions(ctx):
+            # 1. Block Specific Users
             blocked_user_ids = [
                 123456789012345678,  # User 1
-                987654321098765432,  # User 2
-                111222333444555666   # User 3
             ]
             
             if ctx.author.id in blocked_user_ids:
-                # Ephemeral=True ensures only they see the message
                 await ctx.respond("⛔ You are blocked from using this bot.", ephemeral=True)
-                return False  # This stops the command from processing further
+                return False
+
+            # 2. Block Specific Servers (Guilds)
+            blocked_guild_ids = [
+                999888777666555444, # Bad Server 1
+                555555555555555555  # Bad Server 2
+            ]
+
+            # We must check 'ctx.guild' first because it is None in DMs
+            if ctx.guild and ctx.guild.id in blocked_guild_ids:
+                await ctx.respond("⛔ This server is blocked from using this bot.", ephemeral=True)
+                return False
             
             return True
-        # -------------------------
+        # ---------------------------------------------
 
         bot.run(DISCORD_TOKEN)
     except Exception as e:
