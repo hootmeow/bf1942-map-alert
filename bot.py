@@ -72,6 +72,25 @@ if __name__ == "__main__":
             raise ValueError("No token found")
             
         bot = BF1942Bot()
+
+        # --- GLOBAL USER BLOCK ---
+        @bot.check
+        async def global_user_block(ctx):
+            # Add the IDs of the users you want to block here
+            blocked_user_ids = [
+                123456789012345678,  # User 1
+                987654321098765432,  # User 2
+                111222333444555666   # User 3
+            ]
+            
+            if ctx.author.id in blocked_user_ids:
+                # Ephemeral=True ensures only they see the message
+                await ctx.respond("⛔ You are blocked from using this bot.", ephemeral=True)
+                return False  # This stops the command from processing further
+            
+            return True
+        # -------------------------
+
         bot.run(DISCORD_TOKEN)
     except Exception as e:
         logger.critical(f"Failed to run bot: {e}")
