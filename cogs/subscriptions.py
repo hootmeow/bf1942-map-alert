@@ -76,6 +76,15 @@ class SubscriptionCommands(commands.Cog):
                 )
                 return
 
+            # Security Fix: Check if USER has permission to use this channel for alerts
+            user_perms = channel.permissions_for(ctx.author)
+            if not user_perms.manage_channels and not user_perms.administrator:
+                await ctx.respond(
+                    f"❌ You need **Manage Channels** permission in {channel.mention} to set up alerts there.",
+                    ephemeral=True
+                )
+                return
+
         try:
             await self.db.upsert_subscription(
                 ctx.author.id, server, map_name.lower(), players_over, ctx.guild.id, channel_id
@@ -105,6 +114,15 @@ class SubscriptionCommands(commands.Cog):
             if not perms.send_messages or not perms.embed_links:
                 await ctx.respond(
                     f"❌ I don't have permission to **Send Messages** and **Embed Links** in {channel.mention}.",
+                    ephemeral=True
+                )
+                return
+
+            # Security Fix: Check if USER has permission to use this channel for alerts
+            user_perms = channel.permissions_for(ctx.author)
+            if not user_perms.manage_channels and not user_perms.administrator:
+                await ctx.respond(
+                    f"❌ You need **Manage Channels** permission in {channel.mention} to set up alerts there.",
                     ephemeral=True
                 )
                 return
@@ -293,7 +311,7 @@ class SubscriptionCommands(commands.Cog):
                 await ctx.respond("✅ Your DND schedule has been cleared.", ephemeral=True)
         except Exception as e:
             logger.error(f"Error in /dnd clear: {e}")
-            await ctx.respond("Something went wrong.", ephemeral=True)
+            await ctx.respond("Something went wrong, I couldn't clear your DND schedules.", ephemeral=True)
 
     # --- BACKGROUND TASK ---
     @tasks.loop(seconds=45)
