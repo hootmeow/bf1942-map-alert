@@ -311,7 +311,7 @@ class SubscriptionCommands(commands.Cog):
                 await ctx.respond("✅ Your DND schedule has been cleared.", ephemeral=True)
         except Exception as e:
             logger.error(f"Error in /dnd clear: {e}")
-            await ctx.respond("Something went wrong, I couldn't remove your subscriptions.", ephemeral=True)
+            await ctx.respond("Something went wrong, I couldn't clear your DND schedules.", ephemeral=True)
 
     # --- BACKGROUND TASK ---
     @tasks.loop(seconds=45)
