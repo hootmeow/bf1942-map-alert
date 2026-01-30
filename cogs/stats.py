@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord.commands import Option
 import logging
 from core.database import Database
+from utils.validation import validate_input_length, ValidationError
 
 logger = logging.getLogger("bf1942_bot")
 
@@ -52,6 +53,8 @@ class StatCommands(commands.Cog):
     ):
         await ctx.defer(ephemeral=True)
         try:
+            validate_input_length(player_name, 64, "Player Name")
+
             found_player = await self.db.find_player(player_name)
         
             if found_player:
@@ -66,6 +69,8 @@ class StatCommands(commands.Cog):
                 await ctx.followup.send(embed=embed)
             else:
                 await ctx.followup.send(f"Could not find a player named **{player_name}** on any active server.")
+        except ValidationError as e:
+            await ctx.followup.send(str(e), ephemeral=True)
         except Exception as e:
             logger.error(f"Error in /find: {e}")
             await ctx.followup.send("Something went wrong, I couldn't perform the player search.", ephemeral=True)

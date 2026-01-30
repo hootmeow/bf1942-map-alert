@@ -6,6 +6,7 @@ import pytz
 import datetime
 import asyncio
 from core.database import Database
+from utils.validation import validate_input_length, ValidationError
 
 logger = logging.getLogger("bf1942_bot")
 
@@ -86,6 +87,9 @@ class SubscriptionCommands(commands.Cog):
                 return
 
         try:
+            validate_input_length(server, 128, "Server Name")
+            validate_input_length(map_name, 64, "Map Name")
+
             await self.db.upsert_subscription(
                 ctx.author.id, server, map_name.lower(), players_over, ctx.guild.id, channel_id
             )
@@ -95,6 +99,8 @@ class SubscriptionCommands(commands.Cog):
                 f"Alerts will be sent to {destination}.", 
                 ephemeral=True
             )
+        except ValidationError as e:
+            await ctx.respond(str(e), ephemeral=True)
         except Exception as e:
             logger.error(f"Error in /subscribe: {e}")
             await ctx.respond("Something went wrong, I couldn't save your subscription.", ephemeral=True)
@@ -128,6 +134,8 @@ class SubscriptionCommands(commands.Cog):
                 return
 
         try:
+            validate_input_length(server, 128, "Server Name")
+
             await self.db.upsert_subscription(
                 ctx.author.id, server, SERVER_SUB_MAP_NAME, players_over, ctx.guild.id, channel_id
             )
@@ -137,6 +145,8 @@ class SubscriptionCommands(commands.Cog):
                 f"Alerts will be sent to {destination}.", 
                 ephemeral=True
             )
+        except ValidationError as e:
+            await ctx.respond(str(e), ephemeral=True)
         except Exception as e:
             logger.error(f"Error in /subscribe_server: {e}")
             await ctx.respond("Something went wrong, I couldn't save your subscription.", ephemeral=True)
