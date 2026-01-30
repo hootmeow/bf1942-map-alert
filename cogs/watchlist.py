@@ -5,6 +5,7 @@ import logging
 import datetime
 import pytz
 from core.database import Database
+from utils.validation import validate_input_length, ValidationError
 
 logger = logging.getLogger("bf1942_bot")
 
@@ -31,11 +32,15 @@ class Watchlist(commands.Cog):
     ):
         await ctx.defer(ephemeral=True)
         try:
+            validate_input_length(player_name, 64, "Player Name")
+
             # Ensure table exists (idempotent)
             await self.db.init_watchlist_table()
             
             await self.db.add_watchlist(ctx.author.id, player_name)
             await ctx.followup.send(f"✅ You are now watching **{player_name}**. I'll DM you when they join a server.")
+        except ValidationError as e:
+            await ctx.followup.send(str(e), ephemeral=True)
         except Exception as e:
             logger.error(f"Error in /watch: {e}")
             await ctx.followup.send("Something went wrong.", ephemeral=True)
@@ -48,11 +53,15 @@ class Watchlist(commands.Cog):
     ):
         await ctx.defer(ephemeral=True)
         try:
+            validate_input_length(player_name, 64, "Player Name")
+
             count = await self.db.remove_watchlist(ctx.author.id, player_name)
             if count > 0:
                 await ctx.followup.send(f"✅ Stopped watching **{player_name}**.")
             else:
                 await ctx.followup.send(f"You weren't watching **{player_name}**.", ephemeral=True)
+        except ValidationError as e:
+            await ctx.followup.send(str(e), ephemeral=True)
         except Exception as e:
             logger.error(f"Error in /unwatch: {e}")
             await ctx.followup.send("Something went wrong.", ephemeral=True)
