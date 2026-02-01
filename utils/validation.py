@@ -1,3 +1,5 @@
+import discord
+
 class ValidationError(Exception):
     """Exception raised for validation errors."""
     pass
@@ -19,3 +21,14 @@ def validate_input_length(value: str, max_length: int, name: str):
 
     if len(value) > max_length:
         raise ValidationError(f"❌ {name} is too long (max {max_length} characters).")
+
+def sanitize_text(text: str) -> str:
+    """
+    Escapes Discord markdown and mentions to prevent formatting disruption.
+    """
+    if not text:
+        return ""
+    # We use escape_mentions to handle @everyone, @here, etc.
+    text = discord.utils.escape_mentions(str(text))
+    # Then escape_markdown for formatting characters
+    return discord.utils.escape_markdown(text)
