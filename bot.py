@@ -22,7 +22,10 @@ class BF1942Bot(commands.Bot):
         intents.members = True
         intents.messages = True 
         
-        super().__init__(intents=intents)
+        super().__init__(
+            intents=intents,
+            allowed_mentions=discord.AllowedMentions.none()
+        )
         
         # Initialize Database
         self.db = Database(POSTGRES_DSN)

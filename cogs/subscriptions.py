@@ -6,7 +6,7 @@ import pytz
 import datetime
 import asyncio
 from core.database import Database
-from utils.validation import validate_input_length, ValidationError
+from utils.validation import validate_input_length, ValidationError, sanitize_text
 
 logger = logging.getLogger("bf1942_bot")
 
@@ -355,6 +355,10 @@ class SubscriptionCommands(commands.Cog):
                     )
                     
                     player_count = server_data['current_player_count']
+
+                    # Sanitize server and map names for Discord output
+                    s_server_name = sanitize_text(server_name)
+                    s_current_map = sanitize_text(current_map)
                     
                     for sub in subs_to_alert:
                         if player_count <= sub.get("players_over", 0):
@@ -378,12 +382,12 @@ class SubscriptionCommands(commands.Cog):
 
                         if sub['map_name'] == SERVER_SUB_MAP_NAME:
                             title = "📢 BF1942 Server Alert!"
-                            description = f"**{server_name}** has just changed maps to **{current_map}**!"
-                            clean_content = f"{server_name} changed map to {current_map}"
+                            description = f"**{s_server_name}** has just changed maps to **{s_current_map}**!"
+                            clean_content = f"{s_server_name} changed map to {s_current_map}"
                         else:
                             title = "📢 BF1942 Map Alert!"
-                            description = f"The map **{current_map}** has just started on **{server_name}**!"
-                            clean_content = f"Map {current_map} started on {server_name}"
+                            description = f"The map **{s_current_map}** has just started on **{s_server_name}**!"
+                            clean_content = f"Map {s_current_map} started on {s_server_name}"
                         
                         embed = discord.Embed(
                             title=title, description=description, color=discord.Color.gold()
@@ -398,7 +402,11 @@ class SubscriptionCommands(commands.Cog):
                                     perms = channel.permissions_for(channel.guild.me)
                                     if perms.send_messages and perms.embed_links:
                                         # Use content for clean push notifications
-                                        await channel.send(content=clean_content, embed=embed)
+                                        await channel.send(
+                                            content=clean_content,
+                                            embed=embed,
+                                            allowed_mentions=discord.AllowedMentions.none()
+                                        )
                                     else:
                                         logger.warning(f"Missing permissions for channel {channel_id}")
                                 else:
@@ -408,7 +416,11 @@ class SubscriptionCommands(commands.Cog):
                         else:
                             try:
                                 user = await self.bot.fetch_user(sub["user_id"])
-                                await user.send(content=clean_content, embed=embed)
+                                await user.send(
+                                    content=clean_content,
+                                    embed=embed,
+                                    allowed_mentions=discord.AllowedMentions.none()
+                                )
                             except discord.Forbidden:
                                 logger.warning(f"Cannot DM user {sub['user_id']}")
                             except Exception as e:

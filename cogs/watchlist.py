@@ -5,7 +5,7 @@ import logging
 import datetime
 import pytz
 from core.database import Database
-from utils.validation import validate_input_length, ValidationError
+from utils.validation import validate_input_length, ValidationError, sanitize_text
 
 logger = logging.getLogger("bf1942_bot")
 
@@ -116,6 +116,10 @@ class Watchlist(commands.Cog):
                 player_name = sub['player_name']
                 server_name = current_online.get(player_name, "Unknown Server")
 
+                # Sanitize for Discord output
+                s_player_name = sanitize_text(player_name)
+                s_server_name = sanitize_text(server_name)
+
                 # --- Cooldown Check ---
                 # Key: (User, Player)
                 # If they are in cooldown, SKIP
@@ -143,11 +147,15 @@ class Watchlist(commands.Cog):
                     user = await self.bot.fetch_user(user_id)
                     embed = discord.Embed(
                         title="🕵️ Watchlist Alert",
-                        description=f"**{player_name}** just joined **{server_name}**!",
+                        description=f"**{s_player_name}** just joined **{s_server_name}**!",
                         color=discord.Color.magenta()
                     )
-                    clean_content = f"Watchlist: {player_name} joined {server_name}"
-                    await user.send(content=clean_content, embed=embed)
+                    clean_content = f"Watchlist: {s_player_name} joined {s_server_name}"
+                    await user.send(
+                        content=clean_content,
+                        embed=embed,
+                        allowed_mentions=discord.AllowedMentions.none()
+                    )
                     
                     # Set Cooldown (e.g., 15 minutes)
                     # We don't want to ping again if they rejoin within 15 mins
