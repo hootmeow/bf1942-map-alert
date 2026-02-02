@@ -361,6 +361,12 @@ class SubscriptionCommands(commands.Cog):
                     s_current_map = sanitize_text(current_map)
                     
                     for sub in subs_to_alert:
+                        # Security Check: Respect global user/guild blacklist
+                        if sub['user_id'] in self.bot.blocked_user_ids:
+                            continue
+                        if sub.get('guild_id') in self.bot.blocked_guild_ids:
+                            continue
+
                         if player_count <= sub.get("players_over", 0):
                             continue
 
