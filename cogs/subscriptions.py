@@ -361,6 +361,10 @@ class SubscriptionCommands(commands.Cog):
                     s_current_map = sanitize_text(current_map)
                     
                     for sub in subs_to_alert:
+                        # Security Check: Blocked User
+                        if sub['user_id'] in self.bot.blocked_user_ids:
+                            continue
+
                         if player_count <= sub.get("players_over", 0):
                             continue
 
@@ -396,6 +400,10 @@ class SubscriptionCommands(commands.Cog):
                         
                         channel_id = sub.get("channel_id")
                         if channel_id:
+                            # Security Check: Blocked Guild
+                            if sub['guild_id'] in self.bot.blocked_guild_ids:
+                                continue
+
                             try:
                                 channel = self.bot.get_channel(channel_id)
                                 if channel:
