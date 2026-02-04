@@ -29,6 +29,15 @@ class BF1942Bot(commands.Bot):
         
         # Initialize Database
         self.db = Database(POSTGRES_DSN)
+
+        # Global Blacklists
+        self.blocked_user_ids = [
+            123456789012345678,  # User 1
+        ]
+        self.blocked_guild_ids = [
+            999888777666555444,  # Bad Server 1
+            555555555555555555   # Bad Server 2
+        ]
         
         # Load Cogs
         self.load_extensions()
@@ -80,22 +89,13 @@ if __name__ == "__main__":
         @bot.check
         async def global_restrictions(ctx):
             # 1. Block Specific Users
-            blocked_user_ids = [
-                123456789012345678,  # User 1
-            ]
-            
-            if ctx.author.id in blocked_user_ids:
+            if ctx.author.id in bot.blocked_user_ids:
                 await ctx.respond("⛔ You are blocked from using this bot.", ephemeral=True)
                 return False
 
             # 2. Block Specific Servers (Guilds)
-            blocked_guild_ids = [
-                999888777666555444, # Bad Server 1
-                555555555555555555  # Bad Server 2
-            ]
-
             # We must check 'ctx.guild' first because it is None in DMs
-            if ctx.guild and ctx.guild.id in blocked_guild_ids:
+            if ctx.guild and ctx.guild.id in bot.blocked_guild_ids:
                 await ctx.respond("⛔ This server is blocked from using this bot.", ephemeral=True)
                 return False
             
