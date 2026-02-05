@@ -113,6 +113,13 @@ class Watchlist(commands.Cog):
             
             for sub in subs:
                 user_id = sub['user_id']
+
+                # --- Security Fix: Blacklist Check ---
+                if user_id in self.bot.blocked_user_ids:
+                    logger.info(f"Skipping watchlist alert for blocked user {user_id}")
+                    continue
+                # -------------------------------------
+
                 player_name = sub['player_name']
                 server_name = current_online.get(player_name, "Unknown Server")
 
