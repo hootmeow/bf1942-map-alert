@@ -30,6 +30,28 @@ class BF1942Bot(commands.Bot):
         # Initialize Database
         self.db = Database(POSTGRES_DSN)
         
+        # --- GLOBAL RESTRICTIONS (Users & Servers) ---
+        self.blocked_user_ids = [
+            123456789012345678,  # User 1
+        ]
+        self.blocked_guild_ids = [
+            999888777666555444, # Bad Server 1
+            555555555555555555  # Bad Server 2
+        ]
+
+        @self.check
+        async def global_restrictions(ctx):
+            if ctx.author.id in self.blocked_user_ids:
+                await ctx.respond("⛔ You are blocked from using this bot.", ephemeral=True)
+                return False
+
+            if ctx.guild and ctx.guild.id in self.blocked_guild_ids:
+                await ctx.respond("⛔ This server is blocked from using this bot.", ephemeral=True)
+                return False
+
+            return True
+        # ---------------------------------------------
+
         # Load Cogs
         self.load_extensions()
 
@@ -75,33 +97,6 @@ if __name__ == "__main__":
             raise ValueError("No token found")
             
         bot = BF1942Bot()
-
-        # --- GLOBAL RESTRICTIONS (Users & Servers) ---
-        @bot.check
-        async def global_restrictions(ctx):
-            # 1. Block Specific Users
-            blocked_user_ids = [
-                123456789012345678,  # User 1
-            ]
-            
-            if ctx.author.id in blocked_user_ids:
-                await ctx.respond("⛔ You are blocked from using this bot.", ephemeral=True)
-                return False
-
-            # 2. Block Specific Servers (Guilds)
-            blocked_guild_ids = [
-                999888777666555444, # Bad Server 1
-                555555555555555555  # Bad Server 2
-            ]
-
-            # We must check 'ctx.guild' first because it is None in DMs
-            if ctx.guild and ctx.guild.id in blocked_guild_ids:
-                await ctx.respond("⛔ This server is blocked from using this bot.", ephemeral=True)
-                return False
-            
-            return True
-        # ---------------------------------------------
-
         bot.run(DISCORD_TOKEN)
     except Exception as e:
         logger.critical(f"Failed to run bot: {e}")

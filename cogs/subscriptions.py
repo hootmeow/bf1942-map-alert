@@ -364,6 +364,16 @@ class SubscriptionCommands(commands.Cog):
                         if player_count <= sub.get("players_over", 0):
                             continue
 
+                        # --- Security Fix: Blacklist Checks ---
+                        if sub['user_id'] in self.bot.blocked_user_ids:
+                            logger.info(f"Skipping alert for blocked user {sub['user_id']}")
+                            continue
+
+                        if sub.get('guild_id') in self.bot.blocked_guild_ids:
+                            logger.info(f"Skipping alert for blocked guild {sub.get('guild_id')}")
+                            continue
+                        # -------------------------------------
+
                         # DND Check
                         if sub['start_hour_utc'] is not None:
                             is_dnd_day = current_utc_weekday in sub['weekdays_utc']

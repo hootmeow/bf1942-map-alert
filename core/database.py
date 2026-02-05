@@ -230,7 +230,7 @@ class Database:
     async def get_matching_subscriptions(self, server_name: str, map_name: str, server_sub_map_name: str) -> List[asyncpg.Record]:
         sql = """
         SELECT 
-            s.user_id, s.players_over, s.channel_id, s.map_name,
+            s.user_id, s.players_over, s.channel_id, s.map_name, s.guild_id,
             dnd.start_hour_utc, dnd.end_hour_utc, dnd.weekdays_utc
         FROM subscriptions s
         LEFT JOIN user_dnd_rules dnd ON s.user_id = dnd.user_id
