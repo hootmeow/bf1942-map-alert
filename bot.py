@@ -78,7 +78,8 @@ class BF1942Bot(commands.Bot):
             try:
                 await self.db.connect()
             except Exception as e:
-                logger.critical(f"Failed to connect to database on startup: {e}")
+                # We do NOT log the exception object 'e' here because it may contain the DSN (and password).
+                logger.critical(f"Failed to connect to database on startup: {type(e).__name__}")
                 return
 
         await self.sync_commands()
