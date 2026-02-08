@@ -15,7 +15,9 @@ class Database:
             self.pool = await asyncpg.create_pool(self.dsn)
             logger.info("Database connection pool created.")
         except Exception as e:
-            logger.error(f"Failed to connect to database: {e}")
+            # We avoid logging the raw exception object 'e' because it may contain
+            # the POSTGRES_DSN (including credentials) in its message.
+            logger.error("Failed to connect to database. Please check your credentials and network connection.")
             raise e
 
     async def close(self):
