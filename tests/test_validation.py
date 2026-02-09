@@ -1,5 +1,5 @@
 import unittest
-from utils.validation import validate_input_length, ValidationError
+from utils.validation import validate_input_length, ValidationError, sanitize_for_codeblock
 
 class TestValidation(unittest.TestCase):
     def test_valid_input(self):
@@ -19,3 +19,10 @@ class TestValidation(unittest.TestCase):
     def test_empty(self):
         """Should not raise error for empty input (handled as valid length)."""
         validate_input_length("", 5, "Input")
+
+    def test_sanitize_for_codeblock(self):
+        """Should replace backticks with modifier grave accent."""
+        self.assertEqual(sanitize_for_codeblock("normal"), "normal")
+        self.assertEqual(sanitize_for_codeblock("`code`"), "\u02cbcode\u02cb")
+        self.assertEqual(sanitize_for_codeblock("```block```"), "\u02cb\u02cb\u02cbblock\u02cb\u02cb\u02cb")
+        self.assertEqual(sanitize_for_codeblock(None), "")
