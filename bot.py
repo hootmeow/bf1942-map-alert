@@ -77,8 +77,8 @@ class BF1942Bot(commands.Bot):
         if not self.db.pool:
             try:
                 await self.db.connect()
-            except Exception as e:
-                logger.critical(f"Failed to connect to database on startup: {e}")
+            except Exception:
+                logger.critical("Failed to connect to database on startup. (Credentials hidden for security)")
                 return
 
         await self.sync_commands()

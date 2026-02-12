@@ -32,3 +32,12 @@ def sanitize_text(text: str) -> str:
     text = discord.utils.escape_mentions(str(text))
     # Then escape_markdown for formatting characters
     return discord.utils.escape_markdown(text)
+
+def sanitize_for_codeblock(text: str) -> str:
+    """
+    Escapes backticks in external data to prevent breaking out of Discord code blocks.
+    Replaces ` with the visually similar \u02cb (MODIFIER LETTER GRAVE ACCENT).
+    """
+    if not text:
+        return ""
+    return str(text).replace('`', '\u02cb')

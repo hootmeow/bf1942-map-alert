@@ -6,6 +6,7 @@ import logging
 # We will need to import the Database class for type hinting if we want, 
 # but mostly we expect bot.db to be set.
 from core.database import Database
+from utils.validation import sanitize_text, sanitize_for_codeblock
 
 logger = logging.getLogger("bf1942_bot")
 
@@ -64,14 +65,14 @@ class ServerCommands(commands.Cog):
         try:
             server_list = await self.db.get_servers_by_map(map_name)
             if not server_list:
-                await ctx.followup.send(f"Sorry, no servers are currently playing **{map_name}**.")
+                await ctx.followup.send(f"Sorry, no servers are currently playing **{sanitize_text(map_name)}**.")
                 return
 
-            embed = discord.Embed(title=f"Servers Playing: {map_name}", color=discord.Color.orange())
+            embed = discord.Embed(title=f"Servers Playing: {sanitize_text(map_name)}", color=discord.Color.orange())
             description = ""
             for server in server_list:
                 players = f"{server['current_player_count']}/{server['current_max_players']}"
-                description += f"**{server['current_server_name']}** ({players} players)\n"
+                description += f"**{sanitize_text(server['current_server_name'])}** ({players} players)\n"
             embed.description = description
             await ctx.followup.send(embed=embed)
         except Exception as e:
@@ -88,16 +89,16 @@ class ServerCommands(commands.Cog):
         try:
             server_list = await self.db.get_servers_by_gametype(gametype)
             if not server_list:
-                await ctx.followup.send(f"Sorry, no online servers were found running **{gametype}**.")
+                await ctx.followup.send(f"Sorry, no online servers were found running **{sanitize_text(gametype)}**.")
                 return
 
-            embed = discord.Embed(title=f"Servers Playing: {gametype}", color=discord.Color.orange())
+            embed = discord.Embed(title=f"Servers Playing: {sanitize_text(gametype)}", color=discord.Color.orange())
             for server in server_list:
                 players = f"{server['current_player_count']}/{server['current_max_players']}"
                 map_name = server['current_map']
                 embed.add_field(
-                    name=f"**{server['current_server_name']}**",
-                    value=f"🗺️ Map: **{map_name}** | 👥 Players: **{players}**",
+                    name=f"**{sanitize_text(server['current_server_name'])}**",
+                    value=f"🗺️ Map: **{sanitize_text(map_name)}** | 👥 Players: **{players}**",
                     inline=False
                 )
             await ctx.followup.send(embed=embed)
@@ -123,8 +124,8 @@ class ServerCommands(commands.Cog):
                 players = f"{server['current_player_count']}/{server['current_max_players']}"
                 map_name = server['current_map']
                 embed.add_field(
-                    name=f"**{server['current_server_name']}**",
-                    value=f"🗺️ Map: **{map_name}** | 👥 Players: **{players}**",
+                    name=f"**{sanitize_text(server['current_server_name'])}**",
+                    value=f"🗺️ Map: **{sanitize_text(map_name)}** | 👥 Players: **{players}**",
                     inline=False
                 )
             await ctx.followup.send(embed=embed)
@@ -166,12 +167,12 @@ class ServerCommands(commands.Cog):
             team2_players = sorted([p for p in all_players if p['team'] == 2], key=lambda x: x.get('score', 0), reverse=True)
 
             # Embed Creation
-            embed = discord.Embed(title=f"**{hostname}**", color=discord.Color.dark_gray())
+            embed = discord.Embed(title=f"**{sanitize_text(hostname)}**", color=discord.Color.dark_gray())
             
-            embed.add_field(name="🗺️ Map", value=f"`{map_name}`", inline=True)
+            embed.add_field(name="🗺️ Map", value=f"`{sanitize_for_codeblock(map_name)}`", inline=True)
             embed.add_field(name="👥 Players", value=f"`{num_players}/{max_players}`", inline=True)
-            embed.add_field(name="🕹️ Mod", value=f"`{game_mod}`", inline=True)
-            embed.add_field(name="🚩 Gametype", value=f"`{gametype}`", inline=True)
+            embed.add_field(name="🕹️ Mod", value=f"`{sanitize_for_codeblock(game_mod)}`", inline=True)
+            embed.add_field(name="🚩 Gametype", value=f"`{sanitize_for_codeblock(gametype)}`", inline=True)
             embed.add_field(name="⌛ Time Remaining", value=f"`{time_remaining_formatted}`", inline=True)
             # Use inline code block for easy copy-paste without taking up space
             embed.add_field(name="🔌 Address", value=f"`{full_address}`", inline=True)
@@ -185,7 +186,7 @@ class ServerCommands(commands.Cog):
                 for p in players[:15]: 
                     name = p['player_name'] or 'Unknown'
                     # Truncate slightly longer name if needed (now 25 chars)
-                    lines.append(f"{p['score'] or 0:<7}{p['kills'] or 0:<7}{p['deaths'] or 0:<7}{p['ping'] or 0:<6}{name[:25]}")
+                    lines.append(f"{p['score'] or 0:<7}{p['kills'] or 0:<7}{p['deaths'] or 0:<7}{p['ping'] or 0:<6}{sanitize_for_codeblock(name)[:25]}")
                 return "```\n" + "\n".join(lines) + "\n```"
 
             # Team 1

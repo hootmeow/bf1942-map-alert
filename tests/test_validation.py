@@ -19,3 +19,17 @@ class TestValidation(unittest.TestCase):
     def test_empty(self):
         """Should not raise error for empty input (handled as valid length)."""
         validate_input_length("", 5, "Input")
+
+class TestSanitization(unittest.TestCase):
+    def test_sanitize_for_codeblock(self):
+        from utils.validation import sanitize_for_codeblock
+        # Test basic backtick replacement
+        self.assertEqual(sanitize_for_codeblock("test ` backtick"), "test \u02cb backtick")
+        self.assertEqual(sanitize_for_codeblock("```triple```"), "\u02cb\u02cb\u02cbtriple\u02cb\u02cb\u02cb")
+
+        # Test None and empty
+        self.assertEqual(sanitize_for_codeblock(None), "")
+        self.assertEqual(sanitize_for_codeblock(""), "")
+
+        # Test no backticks
+        self.assertEqual(sanitize_for_codeblock("normal text"), "normal text")
