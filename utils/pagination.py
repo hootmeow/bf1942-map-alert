@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from utils.validation import sanitize_text
 
 class SimplePaginationView(discord.ui.View):
     def __init__(self, items, per_page=10, title="List", timeout=180):
@@ -80,10 +81,12 @@ class ServerPaginationView(discord.ui.View):
         )
         
         for server in current_servers:
+            s_server_name = sanitize_text(server['current_server_name'])
+            s_map_name = sanitize_text(server['current_map'])
             players = f"{server['current_player_count']}/{server['current_max_players']}"
             embed.add_field(
-                name=f"**{server['current_server_name']}**",
-                value=f"🗺️ Map: **{server['current_map']}** | 👥 Players: **{players}**",
+                name=f"**{s_server_name}**",
+                value=f"🗺️ Map: **{s_map_name}** | 👥 Players: **{players}**",
                 inline=False
             )
         return embed
