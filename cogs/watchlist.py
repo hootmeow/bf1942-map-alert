@@ -75,7 +75,7 @@ class Watchlist(commands.Cog):
                 await ctx.followup.send("You are not watching any players.")
                 return
             
-            names = [f"• {r['player_name']}" for r in rows]
+            names = [f"• {sanitize_text(r['player_name'])}" for r in rows]
             await ctx.followup.send(f"**Your Watchlist:**\n" + "\n".join(names))
         except Exception as e:
             logger.error(f"Error in /watchlist: {e}")
