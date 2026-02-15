@@ -6,6 +6,7 @@ import logging
 # We will need to import the Database class for type hinting if we want, 
 # but mostly we expect bot.db to be set.
 from core.database import Database
+from utils.validation import sanitize_for_codeblock, sanitize_text
 
 logger = logging.getLogger("bf1942_bot")
 
@@ -71,7 +72,8 @@ class ServerCommands(commands.Cog):
             description = ""
             for server in server_list:
                 players = f"{server['current_player_count']}/{server['current_max_players']}"
-                description += f"**{server['current_server_name']}** ({players} players)\n"
+                s_name = sanitize_text(server['current_server_name'])
+                description += f"**{s_name}** ({players} players)\n"
             embed.description = description
             await ctx.followup.send(embed=embed)
         except Exception as e:
@@ -94,10 +96,11 @@ class ServerCommands(commands.Cog):
             embed = discord.Embed(title=f"Servers Playing: {gametype}", color=discord.Color.orange())
             for server in server_list:
                 players = f"{server['current_player_count']}/{server['current_max_players']}"
-                map_name = server['current_map']
+                s_name = sanitize_text(server['current_server_name'])
+                s_map = sanitize_text(server['current_map'])
                 embed.add_field(
-                    name=f"**{server['current_server_name']}**",
-                    value=f"🗺️ Map: **{map_name}** | 👥 Players: **{players}**",
+                    name=f"**{s_name}**",
+                    value=f"🗺️ Map: **{s_map}** | 👥 Players: **{players}**",
                     inline=False
                 )
             await ctx.followup.send(embed=embed)
@@ -121,10 +124,11 @@ class ServerCommands(commands.Cog):
             )
             for server in server_list:
                 players = f"{server['current_player_count']}/{server['current_max_players']}"
-                map_name = server['current_map']
+                s_name = sanitize_text(server['current_server_name'])
+                s_map = sanitize_text(server['current_map'])
                 embed.add_field(
-                    name=f"**{server['current_server_name']}**",
-                    value=f"🗺️ Map: **{map_name}** | 👥 Players: **{players}**",
+                    name=f"**{s_name}**",
+                    value=f"🗺️ Map: **{s_map}** | 👥 Players: **{players}**",
                     inline=False
                 )
             await ctx.followup.send(embed=embed)
@@ -183,7 +187,8 @@ class ServerCommands(commands.Cog):
                 lines = [f"{'Score':<7}{'Kills':<7}{'Deaths':<7}{'Ping':<6}Player"]
                 lines.append("-" * 55) # Extended dash line
                 for p in players[:15]: 
-                    name = p['player_name'] or 'Unknown'
+                    # Sanitize player name to prevent breaking out of code block
+                    name = sanitize_for_codeblock(p['player_name'] or 'Unknown')
                     # Truncate slightly longer name if needed (now 25 chars)
                     lines.append(f"{p['score'] or 0:<7}{p['kills'] or 0:<7}{p['deaths'] or 0:<7}{p['ping'] or 0:<6}{name[:25]}")
                 return "```\n" + "\n".join(lines) + "\n```"

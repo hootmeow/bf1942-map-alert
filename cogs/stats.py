@@ -3,7 +3,7 @@ from discord.ext import commands
 from discord.commands import Option
 import logging
 from core.database import Database
-from utils.validation import validate_input_length, ValidationError
+from utils.validation import validate_input_length, ValidationError, sanitize_text
 
 logger = logging.getLogger("bf1942_bot")
 
@@ -29,7 +29,8 @@ class StatCommands(commands.Cog):
                 map_desc = "No map subscriptions found."
             else:
                 for i, row in enumerate(map_rows):
-                    map_desc += f"{i+1}. **{row['map_name']}** ({row['count']} subs)\n"
+                    s_map = sanitize_text(row['map_name'])
+                    map_desc += f"{i+1}. **{s_map}** ({row['count']} subs)\n"
             embed.add_field(name="Top 10 Subscribed Maps", value=map_desc, inline=False)
             
             server_desc = ""
@@ -37,7 +38,8 @@ class StatCommands(commands.Cog):
                 server_desc = "No server subscriptions found."
             else:
                 for i, row in enumerate(server_rows):
-                    server_desc += f"{i+1}. **{row['server_name']}** ({row['count']} subs)\n"
+                    s_server = sanitize_text(row['server_name'])
+                    server_desc += f"{i+1}. **{s_server}** ({row['count']} subs)\n"
             embed.add_field(name="Top 10 Subscribed Servers", value=server_desc, inline=False)
             
             await ctx.followup.send(embed=embed)
@@ -58,11 +60,13 @@ class StatCommands(commands.Cog):
             found_player = await self.db.find_player(player_name)
         
             if found_player:
+                s_player = sanitize_text(player_name)
+                s_server = sanitize_text(found_player['current_server_name'])
                 embed = discord.Embed(
-                    title=f"🕵️ Player Found: {player_name}",
+                    title=f"🕵️ Player Found: {s_player}",
                     color=discord.Color.blue()
                 )
-                embed.add_field(name="Server", value=found_player['current_server_name'], inline=False)
+                embed.add_field(name="Server", value=s_server, inline=False)
                 embed.add_field(name="Score", value=str(found_player['score'] or 0), inline=True)
                 embed.add_field(name="Kills", value=str(found_player['kills'] or 0), inline=True)
                 embed.add_field(name="Deaths", value=str(found_player['deaths'] or 0), inline=True)
