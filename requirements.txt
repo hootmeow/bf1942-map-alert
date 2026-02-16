@@ -2,3 +2,5 @@ py-cord
 python-dotenv
 asyncpg
 pytz
+clickhouse-connect
+aiohttp

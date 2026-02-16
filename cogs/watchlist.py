@@ -5,6 +5,7 @@ import logging
 import datetime
 import pytz
 from core.database import Database
+from utils.dnd import is_in_dnd
 
 logger = logging.getLogger("bf1942_bot")
 
@@ -31,11 +32,8 @@ class Watchlist(commands.Cog):
     ):
         await ctx.defer(ephemeral=True)
         try:
-            # Ensure table exists (idempotent)
-            await self.db.init_watchlist_table()
-            
             await self.db.add_watchlist(ctx.author.id, player_name)
-            await ctx.followup.send(f"✅ You are now watching **{player_name}**. I'll DM you when they join a server.")
+            await ctx.followup.send(f"You are now watching **{player_name}**. I'll DM you when they join a server.")
         except Exception as e:
             logger.error(f"Error in /watch: {e}")
             await ctx.followup.send("Something went wrong.", ephemeral=True)
@@ -50,7 +48,7 @@ class Watchlist(commands.Cog):
         try:
             count = await self.db.remove_watchlist(ctx.author.id, player_name)
             if count > 0:
-                await ctx.followup.send(f"✅ Stopped watching **{player_name}**.")
+                await ctx.followup.send(f"Stopped watching **{player_name}**.")
             else:
                 await ctx.followup.send(f"You weren't watching **{player_name}**.", ephemeral=True)
         except Exception as e:
@@ -65,8 +63,8 @@ class Watchlist(commands.Cog):
             if not rows:
                 await ctx.followup.send("You are not watching any players.")
                 return
-            
-            names = [f"• {r['player_name']}" for r in rows]
+
+            names = [f"- {r['player_name']}" for r in rows]
             await ctx.followup.send(f"**Your Watchlist:**\n" + "\n".join(names))
         except Exception as e:
             logger.error(f"Error in /watchlist: {e}")
@@ -84,11 +82,10 @@ class Watchlist(commands.Cog):
             current_online_names = set(current_online.keys())
 
             # 2. Identify Just Joined (Present now, but NOT in previous cycle)
-            # If previous state is empty (bot restart), assume nobody just joined to avoid spam
             just_joined_names = []
             if self.previously_online:
                 just_joined_names = [name for name in current_online_names if name not in self.previously_online]
-            
+
             # Update state for next loop
             self.previously_online = current_online_names
 
@@ -97,59 +94,56 @@ class Watchlist(commands.Cog):
 
             # 3. Find subscribers for these specific players
             subs = await self.db.get_watchlist_subscribers(just_joined_names)
-            
+
             now_utc = datetime.datetime.now(pytz.utc)
-            current_utc_hour = now_utc.hour
-            current_utc_weekday = now_utc.weekday()
-            
+
             for sub in subs:
                 user_id = sub['user_id']
                 player_name = sub['player_name']
                 server_name = current_online.get(player_name, "Unknown Server")
 
                 # --- Cooldown Check ---
-                # Key: (User, Player)
-                # If they are in cooldown, SKIP
                 cooldown_key = (user_id, player_name)
                 if cooldown_key in self.cooldowns:
                     if now_utc < self.cooldowns[cooldown_key]:
-                        continue # Still cooling down
-                
+                        continue
+
                 # --- DND Check ---
-                if sub['start_hour_utc'] is not None:
-                    is_dnd_day = current_utc_weekday in sub['weekdays_utc']
-                    start_h = sub['start_hour_utc']
-                    end_h = sub['end_hour_utc']
-                    is_dnd_hour = False
-                    if start_h <= end_h:
-                        is_dnd_hour = start_h <= current_utc_hour < end_h
-                    else:
-                        is_dnd_hour = current_utc_hour >= start_h or current_utc_hour < end_h
-                    
-                    if is_dnd_day and is_dnd_hour:
-                        continue # Skip for DND
+                if is_in_dnd(sub, now_utc):
+                    continue
+
+                # --- Enriched alert: get server details ---
+                server_detail = await self.db.get_server_details(server_name)
 
                 # --- Send Alert ---
                 try:
                     user = await self.bot.fetch_user(user_id)
                     embed = discord.Embed(
-                        title="🕵️ Watchlist Alert",
+                        title="Watchlist Alert",
                         description=f"**{player_name}** just joined **{server_name}**!",
                         color=discord.Color.magenta()
                     )
+
+                    if server_detail:
+                        map_name = server_detail['current_map'] or 'N/A'
+                        players = f"{server_detail['current_player_count']}/{server_detail['current_max_players']}"
+                        gametype = server_detail['current_gametype'] or 'N/A'
+                        embed.add_field(name="Map", value=map_name, inline=True)
+                        embed.add_field(name="Players", value=players, inline=True)
+                        embed.add_field(name="Gametype", value=gametype, inline=True)
+
                     clean_content = f"Watchlist: {player_name} joined {server_name}"
                     await user.send(content=clean_content, embed=embed)
-                    
-                    # Set Cooldown (e.g., 15 minutes)
-                    # We don't want to ping again if they rejoin within 15 mins
+
+                    # Set Cooldown (15 minutes)
                     self.cooldowns[cooldown_key] = now_utc + datetime.timedelta(minutes=15)
-                    
+
                 except discord.Forbidden:
                     logger.warning(f"Cannot DM user {user_id}")
                 except Exception as e:
                     logger.error(f"Error sending watchlist alert: {e}")
 
-            # Cleanup expired cooldowns (optional, but good for memory)
+            # Cleanup expired cooldowns
             keys_to_delete = [k for k, v in self.cooldowns.items() if now_utc > v]
             for k in keys_to_delete:
                 del self.cooldowns[k]
