@@ -2,9 +2,12 @@ import asyncpg
 import json
 import logging
 import os
+import re
 from typing import List, Optional, Dict, Any, Union
 
 logger = logging.getLogger("bf1942_bot")
+
+LIKE_META_CHARS = re.compile(r"([%_\\])")
 
 
 class Database:
@@ -141,9 +144,22 @@ class Database:
         """Run a ClickHouse query and return a list of dicts. Returns [] if not connected."""
         if not self.ch_client:
             return []
+        query_clean = query.strip()
+        # Defense-in-depth for command injection/multi-statement abuse.
+        if ';' in query_clean:
+            raise ValueError("ClickHouse query must be a single statement")
+        if not query_clean.lower().startswith("select"):
+            raise ValueError("Only read-only SELECT queries are allowed")
         result = self.ch_client.query(query, parameters=parameters)
         columns = result.column_names
         return [dict(zip(columns, row)) for row in result.result_rows]
+
+    @staticmethod
+    def _safe_ilike_prefix(query: str, max_length: int = 64) -> str:
+        """Return a safe prefix pattern for ILIKE by escaping wildcard meta chars."""
+        trimmed = query.strip()[:max_length]
+        escaped = LIKE_META_CHARS.sub(r"\\\1", trimmed)
+        return f"{escaped}%"
 
     # --- Bot State ---
 
@@ -182,28 +198,28 @@ class Database:
         sql = """
         SELECT s.current_server_name
         FROM servers s
-        WHERE s.current_server_name ILIKE $1
+        WHERE s.current_server_name ILIKE $1 ESCAPE '\\'
           AND s.current_state IN ('ACTIVE', 'EMPTY')
         ORDER BY s.current_player_count DESC
         LIMIT 25;
         """
-        rows = await self.fetch(sql, f"{query}%")
+        rows = await self.fetch(sql, self._safe_ilike_prefix(query))
         return [row['current_server_name'] for row in rows]
 
     async def get_map_suggestions(self, query: str) -> List[str]:
-        sql = "SELECT DISTINCT map_name FROM rounds WHERE map_name ILIKE $1 LIMIT 25"
-        rows = await self.fetch(sql, f"{query}%")
+        sql = "SELECT DISTINCT map_name FROM rounds WHERE map_name ILIKE $1 ESCAPE '\\' LIMIT 25"
+        rows = await self.fetch(sql, self._safe_ilike_prefix(query))
         return [row['map_name'] for row in rows]
 
     async def get_gametype_suggestions(self, query: str) -> List[str]:
         sql = """
         SELECT DISTINCT current_gametype AS name
         FROM servers
-        WHERE current_state <> 'OFFLINE' AND current_gametype IS NOT NULL AND current_gametype ILIKE $1
+        WHERE current_state <> 'OFFLINE' AND current_gametype IS NOT NULL AND current_gametype ILIKE $1 ESCAPE '\\'
         ORDER BY name
         LIMIT 25;
         """
-        rows = await self.fetch(sql, f"{query}%")
+        rows = await self.fetch(sql, self._safe_ilike_prefix(query))
         return [row['name'] for row in rows if row['name']]
 
     async def get_player_suggestions(self, query: str) -> List[str]:
@@ -211,11 +227,11 @@ class Database:
         SELECT DISTINCT p.canonical_name AS player_name
         FROM round_player_stats rps
         JOIN players p ON rps.player_id = p.player_id
-        WHERE p.canonical_name ILIKE $1
+        WHERE p.canonical_name ILIKE $1 ESCAPE '\\'
         ORDER BY p.canonical_name
         LIMIT 25;
         """
-        rows = await self.fetch(sql, f"{query}%")
+        rows = await self.fetch(sql, self._safe_ilike_prefix(query))
         return [row['player_name'] for row in rows]
 
     # --- Server Info Queries ---
@@ -516,6 +532,13 @@ class Database:
 
     async def get_leaderboard(self, period: str, server_name: Optional[str] = None, limit: int = 10) -> List[asyncpg.Record]:
         """Top players by V5 score: (score*20) - (kills*10) + (rounds*100). Excludes coop and flagged."""
+        if limit < 1 or limit > 100:
+            raise ValueError("limit must be between 1 and 100")
+
+        allowed_periods = {"all-time", "weekly", "monthly"}
+        if period not in allowed_periods:
+            raise ValueError("Invalid period")
+
         time_filter = ""
         if period == "weekly":
             time_filter = "AND r.start_time >= NOW() - INTERVAL '7 days'"
@@ -637,6 +660,8 @@ class Database:
 
     def get_server_population_trend(self, server_name: str, hours: int = 24) -> List[Dict[str, Any]]:
         """Hourly average population for a server over the last N hours."""
+        if hours < 1 or hours > 24 * 14:
+            raise ValueError("hours must be between 1 and 336")
         return self.ch_query(
             """
             SELECT toStartOfHour(timestamp) AS hour, avg(player_count) AS avg_players
