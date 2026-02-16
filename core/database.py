@@ -42,34 +42,38 @@ class Database:
             raise RuntimeError("Database not connected")
         return await self.pool.fetchrow(query, *args)
 
+    def _sanitize_like(self, text: str) -> str:
+        """Escapes SQL LIKE wildcards % and _."""
+        return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
     # --- Autocomplete Queries ---
 
     async def get_server_suggestions(self, query: str) -> List[str]:
         sql = """
         SELECT s.current_server_name
         FROM servers s
-        WHERE s.current_server_name ILIKE $1
+        WHERE s.current_server_name ILIKE $1 ESCAPE '\'
           AND s.current_state IN ('ACTIVE', 'EMPTY')
         ORDER BY s.current_player_count DESC
         LIMIT 25;
         """
-        rows = await self.fetch(sql, f"{query}%")
+        rows = await self.fetch(sql, f"{self._sanitize_like(query)}%")
         return [row['current_server_name'] for row in rows]
 
     async def get_map_suggestions(self, query: str) -> List[str]:
-        sql = "SELECT DISTINCT map_name FROM rounds WHERE map_name ILIKE $1 LIMIT 25"
-        rows = await self.fetch(sql, f"{query}%")
+        sql = "SELECT DISTINCT map_name FROM rounds WHERE map_name ILIKE $1 ESCAPE '\' LIMIT 25"
+        rows = await self.fetch(sql, f"{self._sanitize_like(query)}%")
         return [row['map_name'] for row in rows]
 
     async def get_gametype_suggestions(self, query: str) -> List[str]:
         sql = """
         SELECT DISTINCT current_gametype AS name
         FROM servers
-        WHERE current_state <> 'OFFLINE' AND current_gametype IS NOT NULL AND current_gametype ILIKE $1
+        WHERE current_state <> 'OFFLINE' AND current_gametype IS NOT NULL AND current_gametype ILIKE $1 ESCAPE '\'
         ORDER BY name
         LIMIT 25;
         """
-        rows = await self.fetch(sql, f"{query}%")
+        rows = await self.fetch(sql, f"{self._sanitize_like(query)}%")
         return [row['name'] for row in rows if row['name']]
 
     # --- Server Info Queries ---
@@ -88,20 +92,20 @@ class Database:
         sql = """
         SELECT current_server_name, current_player_count, current_max_players
         FROM servers
-        WHERE current_state IN ('ACTIVE', 'EMPTY') AND current_map ILIKE $1
+        WHERE current_state IN ('ACTIVE', 'EMPTY') AND current_map ILIKE $1 ESCAPE '\'
         ORDER BY current_player_count DESC;
         """
-        return await self.fetch(sql, map_name)
+        return await self.fetch(sql, self._sanitize_like(map_name))
 
     async def get_servers_by_gametype(self, gametype: str) -> List[asyncpg.Record]:
         sql = """
         SELECT current_server_name, current_map, current_player_count, current_max_players
         FROM servers
-        WHERE current_state IN ('ACTIVE', 'EMPTY') AND current_gametype ILIKE $1
+        WHERE current_state IN ('ACTIVE', 'EMPTY') AND current_gametype ILIKE $1 ESCAPE '\'
         ORDER BY current_player_count DESC
         LIMIT 25;
         """
-        return await self.fetch(sql, gametype)
+        return await self.fetch(sql, self._sanitize_like(gametype))
 
     async def get_seed_servers(self) -> List[asyncpg.Record]:
         sql = """
