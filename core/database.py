@@ -113,6 +113,15 @@ class Database:
                 reason TEXT
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS server_updown_subscriptions (
+                user_id BIGINT NOT NULL,
+                server_name TEXT NOT NULL,
+                guild_id BIGINT,
+                channel_id BIGINT,
+                PRIMARY KEY (user_id, server_name)
+            )
+            """,
         ]
         for sql in statements:
             await self.execute(sql)
@@ -782,3 +791,54 @@ class Database:
     async def get_max_round_id(self) -> int:
         row = await self.fetchrow("SELECT COALESCE(MAX(round_id), 0) AS max_id FROM rounds")
         return row['max_id']
+
+    # --- Server Up/Down Subscription Queries ---
+
+    async def upsert_server_updown_subscription(self, user_id: int, server_name: str, guild_id: int, channel_id: Optional[int]):
+        sql = """
+        INSERT INTO server_updown_subscriptions (user_id, server_name, guild_id, channel_id)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (user_id, server_name)
+        DO UPDATE SET guild_id = EXCLUDED.guild_id, channel_id = EXCLUDED.channel_id;
+        """
+        await self.execute(sql, user_id, server_name, guild_id, channel_id)
+
+    async def delete_server_updown_subscription(self, user_id: int, server_name: str) -> int:
+        sql = "DELETE FROM server_updown_subscriptions WHERE user_id = $1 AND server_name = $2"
+        status = await self.execute(sql, user_id, server_name)
+        return int(status.split(' ')[1])
+
+    async def get_server_updown_subscribers(self, server_name: str) -> List[asyncpg.Record]:
+        sql = """
+        SELECT sus.user_id, sus.channel_id,
+               dnd.start_hour_utc, dnd.end_hour_utc, dnd.weekdays_utc
+        FROM server_updown_subscriptions sus
+        LEFT JOIN user_dnd_rules dnd ON sus.user_id = dnd.user_id
+        WHERE sus.server_name = $1
+        """
+        return await self.fetch(sql, server_name)
+
+    async def get_subscribed_server_states(self) -> List[asyncpg.Record]:
+        """Returns the current state of all servers that have at least one up/down subscriber."""
+        sql = """
+        SELECT DISTINCT s.current_server_name, s.current_state,
+               s.current_player_count, s.current_max_players
+        FROM servers s
+        JOIN server_updown_subscriptions sus ON sus.server_name = s.current_server_name
+        """
+        return await self.fetch(sql)
+
+    # --- Watchlist Online Query ---
+
+    async def get_watchlist_players_online(self, user_id: int) -> List[asyncpg.Record]:
+        """Returns all watchlist players for a user that are currently online, with server/map info."""
+        sql = """
+        SELECT pw.player_name, s.current_server_name, s.current_map,
+               s.current_player_count, s.current_max_players
+        FROM player_watchlist pw
+        JOIN live_player_snapshot lps ON lps.player_name = pw.player_name
+        JOIN servers s ON lps.server_ip = s.ip AND lps.server_port = s.port
+        WHERE pw.user_id = $1 AND s.current_state = 'ACTIVE'
+        ORDER BY pw.player_name
+        """
+        return await self.fetch(sql, user_id)

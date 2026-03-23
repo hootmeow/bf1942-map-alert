@@ -44,12 +44,15 @@ class SubscriptionCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.last_known_maps = {}
+        self.last_known_server_states = {}  # {server_name: bool (True=online)}
         self.check_map_changes.start()
         self.check_round_results.start()
+        self.check_server_updown.start()
 
     def cog_unload(self):
         self.check_map_changes.cancel()
         self.check_round_results.cancel()
+        self.check_server_updown.cancel()
 
     @property
     def db(self) -> Database:
@@ -171,6 +174,54 @@ class SubscriptionCommands(commands.Cog):
                 await ctx.respond(f"You weren't subscribed to round results on **{server}**.", ephemeral=True)
         except Exception as e:
             logger.error(f"Error in /unsubscribe_rounds: {e}")
+            await ctx.respond("Something went wrong.", ephemeral=True)
+
+    @commands.slash_command(name="subscribe_updown", description="Get an alert when a server goes online or offline.")
+    async def subscribe_updown(
+        self,
+        ctx: discord.ApplicationContext,
+        server: Option(str, "Start typing the server name", autocomplete=search_servers),
+        channel: Option(discord.TextChannel, "Optional: The channel to post the alert in (posts to DMs if empty)", required=False, default=None)
+    ):
+        channel_id = channel.id if channel else None
+
+        if channel:
+            perms = channel.permissions_for(ctx.guild.me)
+            if not perms.send_messages or not perms.embed_links:
+                await ctx.respond(
+                    f"I don't have permission to **Send Messages** and **Embed Links** in {channel.mention}.",
+                    ephemeral=True
+                )
+                return
+
+        try:
+            await self.db.upsert_server_updown_subscription(
+                ctx.author.id, server, ctx.guild.id, channel_id
+            )
+            destination = f"channel **{channel.name}**" if channel else "your **DMs**"
+            await ctx.respond(
+                f"You will now receive alerts when **{server}** goes online or offline.\n"
+                f"Alerts will be sent to {destination}.",
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Error in /subscribe_updown: {e}")
+            await ctx.respond("Something went wrong, I couldn't save your subscription.", ephemeral=True)
+
+    @commands.slash_command(name="unsubscribe_updown", description="Stop online/offline alerts for a server.")
+    async def unsubscribe_updown(
+        self,
+        ctx: discord.ApplicationContext,
+        server: Option(str, "Start typing the server name", autocomplete=search_servers)
+    ):
+        try:
+            count = await self.db.delete_server_updown_subscription(ctx.author.id, server)
+            if count > 0:
+                await ctx.respond(f"Unsubscribed from online/offline alerts for **{server}**.", ephemeral=True)
+            else:
+                await ctx.respond(f"You weren't subscribed to online/offline alerts for **{server}**.", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Error in /unsubscribe_updown: {e}")
             await ctx.respond("Something went wrong.", ephemeral=True)
 
     @commands.slash_command(name="list", description="See all of your current map alerts.")
@@ -505,12 +556,27 @@ class SubscriptionCommands(commands.Cog):
                 embed.add_field(name="Winner", value=winner, inline=True)
                 embed.add_field(name="Duration", value=f"{mins}m", inline=True)
 
-                top_players = await self.db.get_round_top_players(round_id)
-                if top_players:
-                    top_lines = []
-                    for i, p in enumerate(top_players, 1):
-                        top_lines.append(f"{i}. **{p['player_name']}** — {p['score']} pts ({p['kills']}K/{p['deaths']}D)")
-                    embed.add_field(name="Top Players", value="\n".join(top_lines), inline=False)
+                all_players = await self.db.get_round_top_players(round_id, limit=100)
+                if all_players:
+                    winning_team = rnd['winning_team']
+                    axis = [p for p in all_players if p['team'] == 1]
+                    allies = [p for p in all_players if p['team'] == 2]
+
+                    def _build_scoreboard(players):
+                        lines = []
+                        for i, p in enumerate(players, 1):
+                            lines.append(f"{i}. **{p['player_name']}** — {p['score']} pts ({p['kills']}K/{p['deaths']}D)")
+                        text = "\n".join(lines)
+                        if len(text) > 1020:
+                            text = text[:1017] + "…"
+                        return text or "No players"
+
+                    axis_label = "🔴 Axis" + (" ✅ Winner" if winning_team == 1 else "")
+                    allies_label = "🔵 Allies" + (" ✅ Winner" if winning_team == 2 else "")
+                    if allies:
+                        embed.add_field(name=allies_label, value=_build_scoreboard(allies), inline=False)
+                    if axis:
+                        embed.add_field(name=axis_label, value=_build_scoreboard(axis), inline=False)
 
                 clean_content = f"Round ended on {server_name}: {rnd['map_name']} — {winner}"
 
@@ -527,6 +593,75 @@ class SubscriptionCommands(commands.Cog):
     @check_round_results.before_loop
     async def before_check_round_results(self):
         await self.bot.wait_until_ready()
+
+    # --- BACKGROUND TASK: SERVER UP/DOWN ---
+    @tasks.loop(seconds=60)
+    async def check_server_updown(self):
+        if not self.bot.db.pool:
+            return
+
+        now_utc = datetime.datetime.now(pytz.utc)
+
+        try:
+            rows = await self.db.get_subscribed_server_states()
+            if not rows:
+                return
+
+            for row in rows:
+                server_name = row['current_server_name']
+                is_online = row['current_state'] in ('ACTIVE', 'EMPTY')
+                was_online = self.last_known_server_states.get(server_name)
+
+                # First time seeing this server — record state without alerting
+                if was_online is None:
+                    self.last_known_server_states[server_name] = is_online
+                    continue
+
+                if is_online == was_online:
+                    continue
+
+                # State transition detected
+                self.last_known_server_states[server_name] = is_online
+                subs = await self.db.get_server_updown_subscribers(server_name)
+                if not subs:
+                    continue
+
+                if is_online:
+                    embed = discord.Embed(
+                        title="Server Online!",
+                        description=f"**{server_name}** is back online!",
+                        color=discord.Color.green()
+                    )
+                    embed.add_field(name="Players", value=f"{row['current_player_count']}/{row['current_max_players']}", inline=True)
+                    clean_content = f"{server_name} is back online"
+                else:
+                    embed = discord.Embed(
+                        title="Server Offline",
+                        description=f"**{server_name}** has gone offline.",
+                        color=discord.Color.red()
+                    )
+                    clean_content = f"{server_name} has gone offline"
+
+                for sub in subs:
+                    if is_in_dnd(sub, now_utc):
+                        continue
+                    await self._send_alert(embed, clean_content, sub.get("channel_id"), sub["user_id"])
+
+            await self.db.set_bot_state("last_known_server_states", self.last_known_server_states)
+
+        except Exception as e:
+            logger.error(f"Error in server updown task: {e}")
+
+    @check_server_updown.before_loop
+    async def before_check_server_updown(self):
+        await self.bot.wait_until_ready()
+        try:
+            saved = await self.db.get_bot_state("last_known_server_states")
+            if saved and isinstance(saved, dict):
+                self.last_known_server_states = saved
+                logger.info(f"Loaded last_known_server_states from DB ({len(saved)} servers).")
+        except Exception as e:
+            logger.warning(f"Could not load last_known_server_states: {e}")
 
 def setup(bot):
     bot.add_cog(SubscriptionCommands(bot))

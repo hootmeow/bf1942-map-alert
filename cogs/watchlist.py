@@ -70,6 +70,55 @@ class Watchlist(commands.Cog):
             logger.error(f"Error in /watchlist: {e}")
             await ctx.followup.send("Something went wrong.", ephemeral=True)
 
+    @commands.slash_command(name="squad", description="See which players on your watchlist are currently online.")
+    async def squad(self, ctx: discord.ApplicationContext):
+        await ctx.defer(ephemeral=True)
+        try:
+            watchlist = await self.db.get_user_watchlist(ctx.author.id)
+            if not watchlist:
+                await ctx.followup.send("You are not watching any players. Use `/watch` to add players.")
+                return
+
+            online = await self.db.get_watchlist_players_online(ctx.author.id)
+
+            if not online:
+                await ctx.followup.send(
+                    f"None of your {len(watchlist)} watched player(s) are currently online."
+                )
+                return
+
+            embed = discord.Embed(
+                title="Squad Status",
+                description=f"**{len(online)}** of **{len(watchlist)}** watched players are online.",
+                color=discord.Color.green()
+            )
+
+            # Group players by server
+            servers: dict = {}
+            for row in online:
+                sname = row['current_server_name']
+                if sname not in servers:
+                    servers[sname] = {
+                        'map': row['current_map'],
+                        'count': row['current_player_count'],
+                        'max': row['current_max_players'],
+                        'players': []
+                    }
+                servers[sname]['players'].append(row['player_name'])
+
+            for server_name, data in servers.items():
+                player_list = ", ".join(f"**{p}**" for p in data['players'])
+                embed.add_field(
+                    name=f"{server_name} ({data['count']}/{data['max']})",
+                    value=f"Map: {data['map']}\n{player_list}",
+                    inline=False
+                )
+
+            await ctx.followup.send(embed=embed)
+        except Exception as e:
+            logger.error(f"Error in /squad: {e}")
+            await ctx.followup.send("Something went wrong.", ephemeral=True)
+
     @tasks.loop(seconds=45)
     async def check_watchlist(self):
         if not self.bot.db.pool:
