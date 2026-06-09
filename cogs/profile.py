@@ -50,7 +50,7 @@ class ProfileCommands(commands.Cog):
             embed.add_field(name="Win Rate", value=f"{wins:,}W ({win_rate})", inline=True)
 
             # Estimated playtime from ClickHouse
-            playtime_secs = self.db.get_player_playtime_seconds(player_name)
+            playtime_secs = await self.db.get_player_playtime_seconds(player_name)
             if playtime_secs > 0:
                 hours = playtime_secs // 3600
                 embed.add_field(name="Est. Playtime", value=f"{hours:,}h", inline=True)

@@ -8,7 +8,7 @@ class SimplePaginationView(discord.ui.View):
         self.per_page = per_page
         self.title = title
         self.current_page = 0
-        self.max_pages = (len(items) - 1) // per_page
+        self.max_pages = max(0, (len(items) - 1) // per_page)
 
         # Disable buttons if single page
         if self.max_pages == 0:
@@ -62,11 +62,13 @@ class ServerPaginationView(discord.ui.View):
         self.servers = servers
         self.per_page = per_page
         self.current_page = 0
-        self.max_pages = (len(servers) - 1) // per_page
-        
+        self.max_pages = max(0, (len(servers) - 1) // per_page)
+
         if self.max_pages == 0:
             self.children[0].disabled = True
             self.children[1].disabled = True
+
+        self.update_buttons()
 
     def create_embed(self):
         start = self.current_page * self.per_page

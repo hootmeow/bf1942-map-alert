@@ -1,3 +1,4 @@
+import asyncio
 import asyncpg
 import json
 import logging
@@ -659,19 +660,26 @@ class Database:
 
     # --- ClickHouse convenience methods ---
 
-    def get_player_playtime_seconds(self, player_name: str) -> int:
-        """Estimated playtime from ClickHouse player_snapshots. Returns 0 if unavailable."""
-        rows = self.ch_query(
-            "SELECT count() * 30 AS playtime_seconds FROM player_snapshots WHERE player_name = {name:String}",
-            parameters={"name": player_name}
-        )
-        return rows[0]['playtime_seconds'] if rows else 0
+    async def get_player_playtime_seconds(self, player_name: str) -> int:
+        """Estimated playtime from ClickHouse player_snapshots. Returns 0 if unavailable.
 
-    def get_server_population_trend(self, server_name: str, hours: int = 24) -> List[Dict[str, Any]]:
+        ClickHouse calls are synchronous, so they run in a thread to avoid
+        blocking the event loop.
+        """
+        def _query() -> int:
+            rows = self.ch_query(
+                "SELECT count() * 30 AS playtime_seconds FROM player_snapshots WHERE player_name = {name:String}",
+                parameters={"name": player_name}
+            )
+            return rows[0]['playtime_seconds'] if rows else 0
+        return await asyncio.to_thread(_query)
+
+    async def get_server_population_trend(self, server_name: str, hours: int = 24) -> List[Dict[str, Any]]:
         """Hourly average population for a server over the last N hours."""
         if hours < 1 or hours > 24 * 14:
             raise ValueError("hours must be between 1 and 336")
-        return self.ch_query(
+        return await asyncio.to_thread(
+            self.ch_query,
             """
             SELECT toStartOfHour(timestamp) AS hour, avg(player_count) AS avg_players
             FROM server_snapshots
@@ -680,12 +688,13 @@ class Database:
             GROUP BY hour
             ORDER BY hour
             """,
-            parameters={"name": server_name, "hours": hours}
+            {"name": server_name, "hours": hours}
         )
 
-    def get_server_peak_hours(self, server_name: str) -> List[Dict[str, Any]]:
+    async def get_server_peak_hours(self, server_name: str) -> List[Dict[str, Any]]:
         """Average population by hour-of-day for a server (last 30 days)."""
-        return self.ch_query(
+        return await asyncio.to_thread(
+            self.ch_query,
             """
             SELECT toHour(timestamp) AS hour_of_day, avg(player_count) AS avg_players
             FROM server_snapshots
@@ -694,7 +703,7 @@ class Database:
             GROUP BY hour_of_day
             ORDER BY hour_of_day
             """,
-            parameters={"name": server_name}
+            {"name": server_name}
         )
 
     # --- Server Trends Queries (Postgres) ---

@@ -28,6 +28,10 @@ class DigestCommands(commands.Cog):
         ctx: discord.ApplicationContext,
         channel: Option(discord.TextChannel, "Optional: channel for digest (DMs if empty)", required=False, default=None)
     ):
+        if ctx.guild is None:
+            await ctx.respond("This command can only be used in a server.", ephemeral=True)
+            return
+
         channel_id = channel.id if channel else None
 
         if channel:

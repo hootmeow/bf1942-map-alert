@@ -42,6 +42,9 @@ class BF1942Bot(commands.Bot):
         self.blocked_user_ids: set = set()
         self.blocked_guild_ids: set = set()
 
+        # Guards one-time startup work (on_ready re-fires on every reconnect)
+        self._startup_done = False
+
         # Load Cogs
         self.load_extensions()
 
@@ -65,6 +68,12 @@ class BF1942Bot(commands.Bot):
 
     async def on_ready(self):
         logger.info(f"Logged in as {self.user} (ID: {self.user.id})")
+
+        # on_ready fires again on every gateway reconnect — only run the
+        # migrations/blocklist/command-sync work once per process.
+        if self._startup_done:
+            return
+        self._startup_done = True
 
         # Connect to Database if not already connected
         if not self.db.pool:
@@ -98,8 +107,24 @@ class BF1942Bot(commands.Bot):
         logger.info("Slash commands synced.")
 
     async def on_application_command_error(self, ctx, error):
-        """Global error handler — logs and sends health webhook."""
+        """Global error handler — logs and sends health webhook for genuine errors."""
+        # Check failures (e.g. blocked users/guilds) already responded to the
+        # user in the check itself — don't log or page ops for those.
+        if isinstance(error, commands.CheckFailure):
+            return
+
         logger.error(f"Command error in /{ctx.command}: {error}")
+
+        # Best-effort: let the user know something broke (cogs handle their own
+        # errors, so reaching here usually means an unexpected failure).
+        try:
+            if ctx.response.is_done():
+                await ctx.followup.send("Something went wrong with that command.", ephemeral=True)
+            else:
+                await ctx.respond("Something went wrong with that command.", ephemeral=True)
+        except Exception:
+            pass
+
         try:
             from utils.health import send_health_alert
             tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))

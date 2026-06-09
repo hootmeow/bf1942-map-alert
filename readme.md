@@ -14,6 +14,7 @@ The bot uses a modular architecture with **Cogs**, a dedicated database abstract
 *   **📡 Live Server Browser:** Browse all active servers with pagination.
 *   **🔔 Map Alerts:** Subscribe to be notified when a specific map comes up, now enriched with previous round results.
 *   **🔔 Round Result Notifications:** Get notified when a round ends on a server with map, winner, duration, and top 3 players.
+*   **🔌 Server Up/Down Alerts:** Get notified when a server comes online or goes offline.
 *   **📰 Daily Digest:** Automated daily summary of rounds played, active players, top servers, and top players.
 *   **📈 Server Trends:** Top players, popular maps, population trends, and peak hours per server.
 *   **📊 Global Stats:** Total rounds, unique players, currently active players, and popular maps.
@@ -72,7 +73,7 @@ graph TD
 
 ## Requirements
 
-*   Python 3.8+
+*   Python 3.9+
 *   PostgreSQL Database (with BF1942 stats schema)
 *   **Optional:** ClickHouse (for playtime estimates, population trends, peak hours)
 *   **Libraries**:
@@ -124,6 +125,7 @@ graph TD
 *   **/watch `[player]`**: Receive a DM when this player joins any server (includes map, players, gametype).
 *   **/unwatch `[player]`**: Stop tracking a player.
 *   **/watchlist**: See who you are currently tracking.
+*   **/squad**: See which players on your watchlist are currently online, grouped by server.
 
 ### 🖥️ Servers
 *   **/servers**: Browse a live list of all active servers (supports pagination).
@@ -138,6 +140,8 @@ graph TD
 *   **/subscribe_server `[server]`**: Alert for *any* map change on a server.
 *   **/subscribe_rounds `[server]`**: Get notified when a round ends (map, winner, duration, top 3).
 *   **/unsubscribe_rounds `[server]`**: Stop round result notifications.
+*   **/subscribe_updown `[server]`**: Get an alert when a server goes online or offline.
+*   **/unsubscribe_updown `[server]`**: Stop online/offline alerts for a server.
 *   **/list**: View your active subscriptions.
 *   **/unsubscribe**: Remove all subscriptions.
 *   **/pause_alerts**: Temporarily pause/unpause all alerts.
@@ -164,6 +168,7 @@ The bot automatically creates and manages these tables on startup:
 | `user_dnd_rules` | Do Not Disturb schedules |
 | `player_watchlist` | Player tracking watchlist |
 | `round_result_subscriptions` | Round end notification subscriptions |
+| `server_updown_subscriptions` | Server online/offline alert subscriptions |
 | `digest_subscriptions` | Daily digest subscriptions |
 | `bot_state` | Persistent bot state (map tracking, watermarks) |
 | `bot_blocklist` | Blocked users and guilds |

@@ -69,6 +69,10 @@ class SubscriptionCommands(commands.Cog):
         players_over: Option(int, "Optional: Only alert if player count is over this number", required=False, default=0),
         channel: Option(discord.TextChannel, "Optional: The channel to post the alert in (posts to DMs if empty)", required=False, default=None)
     ):
+        if ctx.guild is None:
+            await ctx.respond("This command can only be used in a server.", ephemeral=True)
+            return
+
         channel_id = channel.id if channel else None
 
         if channel:
@@ -103,6 +107,10 @@ class SubscriptionCommands(commands.Cog):
         players_over: Option(int, "Optional: Only alert if player count is over this number", required=False, default=0),
         channel: Option(discord.TextChannel, "Optional: The channel to post the alert in (posts to DMs if empty)", required=False, default=None)
     ):
+        if ctx.guild is None:
+            await ctx.respond("This command can only be used in a server.", ephemeral=True)
+            return
+
         channel_id = channel.id if channel else None
 
         if channel:
@@ -135,6 +143,10 @@ class SubscriptionCommands(commands.Cog):
         server: Option(str, "Start typing the server name", autocomplete=search_servers),
         channel: Option(discord.TextChannel, "Optional: The channel to post the alert in (posts to DMs if empty)", required=False, default=None)
     ):
+        if ctx.guild is None:
+            await ctx.respond("This command can only be used in a server.", ephemeral=True)
+            return
+
         channel_id = channel.id if channel else None
 
         if channel:
@@ -183,6 +195,10 @@ class SubscriptionCommands(commands.Cog):
         server: Option(str, "Start typing the server name", autocomplete=search_servers),
         channel: Option(discord.TextChannel, "Optional: The channel to post the alert in (posts to DMs if empty)", required=False, default=None)
     ):
+        if ctx.guild is None:
+            await ctx.respond("This command can only be used in a server.", ephemeral=True)
+            return
+
         channel_id = channel.id if channel else None
 
         if channel:
