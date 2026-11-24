@@ -211,11 +211,14 @@ class Database:
         return [dict(zip(columns, row)) for row in result.result_rows]
 
     @staticmethod
-    def _safe_ilike_prefix(query: str, max_length: int = 64) -> str:
+    def _escape_like(query: str, max_length: int = 64) -> str:
+        """Escape LIKE wildcard meta chars so the value matches literally."""
+        return LIKE_META_CHARS.sub(r"\\\1", query.strip()[:max_length])
+
+    @classmethod
+    def _safe_ilike_prefix(cls, query: str, max_length: int = 64) -> str:
         """Return a safe prefix pattern for ILIKE by escaping wildcard meta chars."""
-        trimmed = query.strip()[:max_length]
-        escaped = LIKE_META_CHARS.sub(r"\\\1", trimmed)
-        return f"{escaped}%"
+        return f"{cls._escape_like(query, max_length)}%"
 
     # --- Bot State ---
 
@@ -318,20 +321,20 @@ class Database:
         sql = """
         SELECT current_server_name, current_player_count, current_max_players
         FROM servers
-        WHERE current_state IN ('ACTIVE', 'EMPTY') AND current_map ILIKE $1
+        WHERE current_state IN ('ACTIVE', 'EMPTY') AND current_map ILIKE $1 ESCAPE '\\'
         ORDER BY current_player_count DESC;
         """
-        return await self.fetch(sql, map_name)
+        return await self.fetch(sql, self._escape_like(map_name))
 
     async def get_servers_by_gametype(self, gametype: str) -> List[asyncpg.Record]:
         sql = """
         SELECT current_server_name, current_map, current_player_count, current_max_players
         FROM servers
-        WHERE current_state IN ('ACTIVE', 'EMPTY') AND current_gametype ILIKE $1
+        WHERE current_state IN ('ACTIVE', 'EMPTY') AND current_gametype ILIKE $1 ESCAPE '\\'
         ORDER BY current_player_count DESC
         LIMIT 25;
         """
-        return await self.fetch(sql, gametype)
+        return await self.fetch(sql, self._escape_like(gametype))
 
     async def get_seed_servers(self) -> List[asyncpg.Record]:
         sql = """

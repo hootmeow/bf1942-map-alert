@@ -179,13 +179,13 @@ class ServerCommands(commands.Cog):
                 return "```\n" + "\n".join(lines) + "\n```"
 
             # Team 1
-            tickets1 = server['tickets1'] or 'N/A'
+            tickets1 = server['tickets1'] if server['tickets1'] is not None else 'N/A'
             team1_header = f"Axis (Team 1) - Tickets: {tickets1}"
             team1_body = "No players on this team." if not team1_players else format_table(team1_players)
             embed.add_field(name=team1_header, value=team1_body, inline=False)
 
             # Team 2
-            tickets2 = server['tickets2'] or 'N/A'
+            tickets2 = server['tickets2'] if server['tickets2'] is not None else 'N/A'
             team2_header = f"Allies (Team 2) - Tickets: {tickets2}"
             team2_body = "No players on this team." if not team2_players else format_table(team2_players)
             embed.add_field(name=team2_header, value=team2_body, inline=False)
