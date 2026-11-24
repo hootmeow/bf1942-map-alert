@@ -26,10 +26,12 @@ ENV_BLOCKED_GUILDS = [
 
 class BF1942Bot(commands.Bot):
     def __init__(self):
-        intents = discord.Intents.default()
-        intents.presences = True
-        intents.members = True
-        intents.messages = True
+        # Slash commands arrive as interactions and need no intents. Only the
+        # guild/channel cache is used (channel lookups, permissions_for(guild.me)),
+        # so skip members/presences/messages: they were unused, cost memory and
+        # gateway traffic, and members/presences need verification at 100 guilds.
+        intents = discord.Intents.none()
+        intents.guilds = True
 
         super().__init__(
             intents=intents,
