@@ -123,6 +123,11 @@ class Database:
                 PRIMARY KEY (user_id, server_name)
             )
             """,
+            # Lets round-result alerts skip rounds that ended before the user subscribed
+            """
+            ALTER TABLE round_result_subscriptions
+                ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            """,
         ]
         for sql in statements:
             await self.execute(sql)
@@ -491,17 +496,26 @@ class Database:
         status = await self.execute(sql, user_id, server_name)
         return int(status.split(' ')[1])
 
-    async def get_new_completed_rounds(self, last_round_id: int) -> List[asyncpg.Record]:
+    async def get_recent_completed_rounds(self, id_window: int) -> List[asyncpg.Record]:
+        """Rounds that ended in the last 2 hours on servers someone follows.
+
+        Rounds run concurrently on many servers, so they finish out of round_id
+        order; callers track which ids they've already announced. The round_id
+        floor keeps this an index range scan instead of a scan of all rounds.
+        """
         sql = """
         SELECT r.round_id AS id, sv.current_server_name AS server_name,
                r.map_name, r.winner_team AS winning_team, r.duration_seconds,
                r.start_time, r.end_time
         FROM rounds r
         JOIN servers sv ON r.server_id = sv.server_id
-        WHERE r.round_id > $1 AND r.end_time IS NOT NULL
-        ORDER BY r.round_id ASC
+        WHERE r.round_id > (SELECT COALESCE(MAX(round_id), 0) FROM rounds) - $1
+          AND r.end_time IS NOT NULL
+          AND r.end_time >= NOW() - INTERVAL '2 hours'
+          AND sv.current_server_name IN (SELECT server_name FROM round_result_subscriptions)
+        ORDER BY r.end_time ASC, r.round_id ASC
         """
-        return await self.fetch(sql, last_round_id)
+        return await self.fetch(sql, id_window)
 
     async def get_round_top_players(self, round_id: int, limit: int = 3) -> List[asyncpg.Record]:
         sql = """
@@ -518,7 +532,7 @@ class Database:
 
     async def get_round_result_subscribers(self, server_name: str) -> List[asyncpg.Record]:
         sql = """
-        SELECT rrs.user_id, rrs.channel_id,
+        SELECT rrs.user_id, rrs.channel_id, rrs.created_at,
                dnd.start_hour_utc, dnd.end_hour_utc, dnd.weekdays_utc
         FROM round_result_subscriptions rrs
         LEFT JOIN user_dnd_rules dnd ON rrs.user_id = dnd.user_id
@@ -796,10 +810,6 @@ class Database:
         LIMIT $1
         """
         return await self.fetch(sql, limit)
-
-    async def get_max_round_id(self) -> int:
-        row = await self.fetchrow("SELECT COALESCE(MAX(round_id), 0) AS max_id FROM rounds")
-        return row['max_id']
 
     # --- Server Up/Down Subscription Queries ---
 

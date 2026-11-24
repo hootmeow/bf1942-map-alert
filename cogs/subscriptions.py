@@ -12,6 +12,10 @@ logger = logging.getLogger("bf1942_bot")
 
 SERVER_SUB_MAP_NAME = "*all*"
 
+# How far back (in round ids) to look for newly finished rounds. ~2.5k rounds
+# start per day, so this comfortably covers any round still running.
+ROUND_ID_WINDOW = 5000
+
 # Helper Constants for DND
 DAY_MAP = {
     "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6
@@ -45,6 +49,7 @@ class SubscriptionCommands(commands.Cog):
         self.bot = bot
         self.last_known_maps = {}
         self.last_known_server_states = {}  # {server_name: bool (True=online)}
+        self.announced_round_ids = None  # set of round ids already alerted; None = not loaded
         self.check_map_changes.start()
         self.check_round_results.start()
         self.check_server_updown.start()
@@ -536,23 +541,22 @@ class SubscriptionCommands(commands.Cog):
         now_utc = datetime.datetime.now(pytz.utc)
 
         try:
-            # Get watermark
-            last_id = await self.db.get_bot_state("last_round_result_id")
-            if last_id is None:
-                last_id = await self.db.get_max_round_id()
-                await self.db.set_bot_state("last_round_result_id", last_id)
-                return
+            recent_rounds = await self.db.get_recent_completed_rounds(ROUND_ID_WINDOW)
+            recent_ids = {rnd['id'] for rnd in recent_rounds}
 
-            new_rounds = await self.db.get_new_completed_rounds(last_id)
-            if not new_rounds:
-                return
+            if self.announced_round_ids is None:
+                saved = await self.db.get_bot_state("announced_round_ids")
+                if saved is None:
+                    # First run: treat everything already finished as announced
+                    self.announced_round_ids = recent_ids
+                    await self.db.set_bot_state("announced_round_ids", sorted(recent_ids))
+                    return
+                self.announced_round_ids = set(saved)
 
-            max_seen_id = last_id
+            new_rounds = [rnd for rnd in recent_rounds if rnd['id'] not in self.announced_round_ids]
+
             for rnd in new_rounds:
                 round_id = rnd['id']
-                if round_id > max_seen_id:
-                    max_seen_id = round_id
-
                 server_name = rnd['server_name']
                 subs = await self.db.get_round_result_subscribers(server_name)
                 if not subs:
@@ -596,12 +600,22 @@ class SubscriptionCommands(commands.Cog):
 
                 clean_content = f"Round ended on {server_name}: {rnd['map_name']} — {winner}"
 
+                ended_at = rnd['end_time']
+                if ended_at.tzinfo is None:
+                    ended_at = ended_at.replace(tzinfo=pytz.utc)
+
                 for sub in subs:
+                    # Don't send rounds that finished before the user subscribed
+                    if ended_at < sub['created_at']:
+                        continue
                     if is_in_dnd(sub, now_utc):
                         continue
                     await self._send_alert(embed, clean_content, sub.get("channel_id"), sub["user_id"])
 
-            await self.db.set_bot_state("last_round_result_id", max_seen_id)
+            # Everything in the window is now handled; ids that aged out are dropped
+            if recent_ids != self.announced_round_ids:
+                self.announced_round_ids = recent_ids
+                await self.db.set_bot_state("announced_round_ids", sorted(recent_ids))
 
         except Exception as e:
             logger.error(f"Error in round results task: {e}")
