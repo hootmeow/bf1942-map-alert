@@ -6,6 +6,7 @@ import pytz
 import datetime
 import asyncio
 from core.database import Database
+from utils.alerts import send_alert
 from utils.dnd import is_in_dnd
 
 logger = logging.getLogger("bf1942_bot")
@@ -417,27 +418,7 @@ class SubscriptionCommands(commands.Cog):
     # --- Shared alert sender ---
     async def _send_alert(self, embed, clean_content, channel_id, user_id):
         """Send an alert to a channel or DM."""
-        if channel_id:
-            try:
-                channel = self.bot.get_channel(channel_id)
-                if channel:
-                    perms = channel.permissions_for(channel.guild.me)
-                    if perms.send_messages and perms.embed_links:
-                        await channel.send(content=clean_content, embed=embed)
-                    else:
-                        logger.warning(f"Missing permissions for channel {channel_id}")
-                else:
-                    logger.warning(f"Could not find channel {channel_id}")
-            except Exception as e:
-                logger.error(f"Error sending channel alert: {e}")
-        else:
-            try:
-                user = await self.bot.fetch_user(user_id)
-                await user.send(content=clean_content, embed=embed)
-            except discord.Forbidden:
-                logger.warning(f"Cannot DM user {user_id}")
-            except Exception as e:
-                logger.error(f"Error sending DM alert: {e}")
+        await send_alert(self.bot, embed, clean_content, channel_id, user_id)
 
     # --- BACKGROUND TASK: MAP CHANGES ---
     @tasks.loop(seconds=45)

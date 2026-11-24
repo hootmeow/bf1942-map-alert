@@ -5,6 +5,7 @@ import logging
 import datetime
 import pytz
 from core.database import Database
+from utils.alerts import send_alert
 
 logger = logging.getLogger("bf1942_bot")
 
@@ -127,26 +128,7 @@ class DigestCommands(commands.Cog):
             # DND isn't applied: the digest is sent once a day, so skipping it
             # for anyone whose quiet hours cover midnight meant they never got it.
             for sub in subs:
-                channel_id = sub.get("channel_id")
-                user_id = sub["user_id"]
-
-                if channel_id:
-                    try:
-                        channel = self.bot.get_channel(channel_id)
-                        if channel:
-                            perms = channel.permissions_for(channel.guild.me)
-                            if perms.send_messages and perms.embed_links:
-                                await channel.send(content=clean_content, embed=embed)
-                    except Exception as e:
-                        logger.error(f"Error sending digest to channel {channel_id}: {e}")
-                else:
-                    try:
-                        user = await self.bot.fetch_user(user_id)
-                        await user.send(content=clean_content, embed=embed)
-                    except discord.Forbidden:
-                        logger.warning(f"Cannot DM user {user_id}")
-                    except Exception as e:
-                        logger.error(f"Error sending digest DM: {e}")
+                await send_alert(self.bot, embed, clean_content, sub.get("channel_id"), sub["user_id"])
 
             await self.db.set_bot_state("last_digest_date", today_key)
             logger.info(f"Daily digest sent to {len(subs)} subscribers.")

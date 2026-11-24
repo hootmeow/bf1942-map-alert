@@ -5,6 +5,7 @@ import logging
 import datetime
 import pytz
 from core.database import Database
+from utils.alerts import send_alert
 from utils.dnd import is_in_dnd
 
 logger = logging.getLogger("bf1942_bot")
@@ -167,32 +168,24 @@ class Watchlist(commands.Cog):
                 server_detail = await self.db.get_server_details(server_name)
 
                 # --- Send Alert ---
-                try:
-                    user = await self.bot.fetch_user(user_id)
-                    embed = discord.Embed(
-                        title="Watchlist Alert",
-                        description=f"**{player_name}** just joined **{server_name}**!",
-                        color=discord.Color.magenta()
-                    )
+                embed = discord.Embed(
+                    title="Watchlist Alert",
+                    description=f"**{player_name}** just joined **{server_name}**!",
+                    color=discord.Color.magenta()
+                )
 
-                    if server_detail:
-                        map_name = server_detail['current_map'] or 'N/A'
-                        players = f"{server_detail['current_player_count']}/{server_detail['current_max_players']}"
-                        gametype = server_detail['current_gametype'] or 'N/A'
-                        embed.add_field(name="Map", value=map_name, inline=True)
-                        embed.add_field(name="Players", value=players, inline=True)
-                        embed.add_field(name="Gametype", value=gametype, inline=True)
+                if server_detail:
+                    map_name = server_detail['current_map'] or 'N/A'
+                    players = f"{server_detail['current_player_count']}/{server_detail['current_max_players']}"
+                    gametype = server_detail['current_gametype'] or 'N/A'
+                    embed.add_field(name="Map", value=map_name, inline=True)
+                    embed.add_field(name="Players", value=players, inline=True)
+                    embed.add_field(name="Gametype", value=gametype, inline=True)
 
-                    clean_content = f"Watchlist: {player_name} joined {server_name}"
-                    await user.send(content=clean_content, embed=embed)
-
+                clean_content = f"Watchlist: {player_name} joined {server_name}"
+                if await send_alert(self.bot, embed, clean_content, None, user_id):
                     # Set Cooldown (15 minutes)
                     self.cooldowns[cooldown_key] = now_utc + datetime.timedelta(minutes=15)
-
-                except discord.Forbidden:
-                    logger.warning(f"Cannot DM user {user_id}")
-                except Exception as e:
-                    logger.error(f"Error sending watchlist alert: {e}")
 
             # Cleanup expired cooldowns
             keys_to_delete = [k for k, v in self.cooldowns.items() if now_utc > v]
