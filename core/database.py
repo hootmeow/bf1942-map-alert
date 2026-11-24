@@ -401,6 +401,15 @@ class Database:
         status = await self.execute(sql, is_paused, user_id)
         return int(status.split(' ')[1])
 
+    async def delete_subscriptions_for_channel(self, channel_id: int) -> int:
+        """Remove every alert subscription that posts to channel_id. Returns rows removed."""
+        removed = 0
+        for table in ("subscriptions", "round_result_subscriptions",
+                      "server_updown_subscriptions", "digest_subscriptions"):
+            status = await self.execute(f"DELETE FROM {table} WHERE channel_id = $1", channel_id)
+            removed += int(status.split(' ')[1])
+        return removed
+
     # --- DND Queries ---
 
     async def upsert_dnd_rule(self, user_id: int, start_hour: int, end_hour: int, weekdays: List[int], timezone: str,
