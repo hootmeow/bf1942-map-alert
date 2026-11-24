@@ -8,6 +8,7 @@ logger = logging.getLogger("bf1942_bot")
 class General(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.last_status_text = None
         self.update_status.start()
 
     def cog_unload(self):
@@ -27,8 +28,12 @@ class General(commands.Cog):
             server_count = len(servers)
             player_count = sum(s['current_player_count'] for s in servers)
 
-            status_text = f"Watching {server_count} Servers | {player_count} Players"
-            
+            # ActivityType.watching already renders as "Watching <name>"
+            status_text = f"{server_count} Servers | {player_count} Players"
+            if status_text == self.last_status_text:
+                return
+            self.last_status_text = status_text
+
             await self.bot.change_presence(
                 activity=discord.Activity(
                     type=discord.ActivityType.watching, 
