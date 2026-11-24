@@ -10,10 +10,11 @@ The bot uses a modular architecture with **Cogs**, a dedicated database abstract
 
 *   **🏆 Leaderboards:** Top players ranked by V5 score, filterable by time period and server.
 *   **📋 Player Profiles:** Lifetime stats, K/D, win rate, top maps, top servers, recent rounds, and personal bests.
-*   **🕵️ Player Watchlist:** Get a DM when your friends (or rivals) join a server, with map/players/gametype details.
+*   **🕵️ Player Watchlist:** Get a DM when your friends (or rivals) join a server, with the server address, map, players, gametype, time left, tickets and which team they joined.
 *   **📡 Live Server Browser:** Browse all active servers with pagination.
-*   **🔔 Map Alerts:** Subscribe to be notified when a specific map comes up, enriched with the previous round's result.
-*   **🔔 Round Result Notifications:** Get notified when a round ends on a server with map, winner, duration, and per-team scoreboards.
+*   **🔔 Map Alerts:** Subscribe to be notified when a specific map comes up, with the server address, players, gametype/mod, time left, tickets, the map it changed from, and the previous round's result.
+*   **🔔 Round Result Notifications:** Get notified when a round ends on a server with map, winner, duration, gametype, start/end time, server address, what's playing now, and per-team scoreboards.
+*   **🔗 captheflag.com Links:** Alerts link servers, players and rounds to their pages on [captheflag.com](https://captheflag.com); times use Discord timestamps so they show in each reader's own timezone.
 *   **🔌 Server Up/Down Alerts:** Get notified when a server comes online or goes offline (confirmed over two checks, so a single missed query doesn't page you).
 *   **📰 Daily Digest:** Automated daily summary of rounds played, active players, top servers, and top players.
 *   **📈 Server Trends:** Top players, popular maps, population trends, and peak hours per server.
@@ -44,6 +45,7 @@ graph TD
     subgraph Utils ["Shared Utilities"]
         Alerts[utils/alerts.py]
         Autocomplete[utils/autocomplete.py]
+        Embeds[utils/embeds.py]
         DND[utils/dnd.py]
         Health
         Pagination[utils/pagination.py]
@@ -54,6 +56,8 @@ graph TD
     Subs -->|Sends via| Alerts
     Watch -->|Sends via| Alerts
     Digest -->|Sends via| Alerts
+    Subs -->|Builds with| Embeds
+    Watch -->|Builds with| Embeds
     Subs -->|Uses| DND
     Watch -->|Uses| DND
 
@@ -66,6 +70,7 @@ graph TD
 *   **`core/logger.py`**: Console + rotating file logging (`bot.log` in the project root, 5 × 5 MB).
 *   **`utils/alerts.py`**: Shared alert sender for channels and DMs. Respects the blocklist, pauses DMs for 24h to users who have them closed, and removes subscriptions for channels that stay unreachable.
 *   **`utils/autocomplete.py`**: Shared server / map / gametype / player autocomplete callbacks.
+*   **`utils/embeds.py`**: Shared alert embed pieces: captheflag.com server/player/round links, server address/gametype/tickets fields, Discord timestamps.
 *   **`utils/dnd.py`**: Do Not Disturb check, evaluated in the user's timezone.
 *   **`utils/health.py`**: Error webhook alerts to a Discord channel.
 *   **`utils/pagination.py`**: Paginated embed views.
@@ -118,6 +123,9 @@ The bot only requests the `guilds` gateway intent. Slash commands arrive as inte
     DISCORD_WEBHOOK_URL=
     BLOCKED_USERS=
     BLOCKED_GUILDS=
+
+    # Base URL for links in alerts (default https://captheflag.com)
+    SITE_URL=
     ```
 
 3.  **Run**:
@@ -144,7 +152,7 @@ sudo journalctl -u bf1942-map-bot -f    # wait for "Slash commands synced."
 *   **/profile `[player]`**: Lifetime stats, K/D ratio, win rate, top maps/servers, recent rounds, personal bests, and estimated playtime.
 
 ### 🕵️ Watchlist
-*   **/watch `[player]`**: Receive a DM when this player joins any server (includes map, players, gametype). Names are exact and case-sensitive; alerts for the same player are limited to one per 15 minutes.
+*   **/watch `[player]`**: Receive a DM when this player joins any server (includes address, map, players, gametype, time left, tickets, team). Names are exact and case-sensitive; alerts for the same player are limited to one per 15 minutes.
 *   **/unwatch `[player]`**: Stop tracking a player.
 *   **/watchlist**: See who you are currently tracking.
 *   **/squad**: See which players on your watchlist are currently online, grouped by server.
@@ -160,7 +168,7 @@ sudo journalctl -u bf1942-map-bot -f    # wait for "Slash commands synced."
 ### 🔔 Alerts & Subscriptions
 *   **/subscribe `[server]` `[map]`**: Alert for a specific map on a server.
 *   **/subscribe_server `[server]`**: Alert for *any* map change on a server.
-*   **/subscribe_rounds `[server]`**: Get notified when a round ends (map, winner, duration, per-team scoreboards). Only rounds that end after you subscribe are sent.
+*   **/subscribe_rounds `[server]`**: Get notified when a round ends (map, winner, duration, gametype, start/end time, address, per-team scoreboards). Only rounds that end after you subscribe are sent.
 *   **/unsubscribe_rounds `[server]`**: Stop round result notifications.
 *   **/subscribe_updown `[server]`**: Get an alert when a server goes online or offline.
 *   **/unsubscribe_updown `[server]`**: Stop online/offline alerts for a server.
