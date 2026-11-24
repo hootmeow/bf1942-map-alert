@@ -1,5 +1,7 @@
 # BF1942 Map Alert Bot
 
+**Version 2.1** · Live Battlefield 1942 alerts and stats for Discord, powered by [captheflag.com](https://captheflag.com)
+
 ## Overview
 
 A high-performance, asynchronous Discord bot built with `py-cord` and `asyncpg`. It connects to the [captheflag.com](https://captheflag.com) statistics database (PostgreSQL) and optionally ClickHouse to provide real-time server information, player tracking, leaderboards, player profiles, round result notifications, and map change alerts.
@@ -22,51 +24,85 @@ The bot uses a modular architecture with **Cogs**, a dedicated database abstract
 *   **📊 Dynamic Status:** The bot's status updates every minute with real-time server and player counts.
 *   **📜 Detailed Scoreboards:** Live scoreboards with ticket counts and copy-paste friendly IP addresses.
 *   **🕒 Do Not Disturb:** Set quiet hours in your own timezone where the bot will hold back notifications.
+*   **ℹ️ About:** `/about` shows the version, uptime and links back to captheflag.com.
 
 ## Architecture
 
 ```mermaid
-graph TD
-    Bot[bot.py] -->|Loads| Cogs
-    Bot -->|Connects| DB[core/database.py]
-    Bot -->|Error alerts| Health[utils/health.py]
+flowchart LR
+    Discord(["💬 Discord<br/>slash commands · DMs · channels"])
 
-    subgraph Cogs ["Command Modules"]
-        Servers[cogs/servers.py]
-        Subs[cogs/subscriptions.py]
-        Stats[cogs/stats.py]
-        General[cogs/general.py]
-        Watch[cogs/watchlist.py]
-        Leaderboard[cogs/leaderboard.py]
-        Profile[cogs/profile.py]
-        Digest[cogs/digest.py]
+    subgraph Startup["🚀 Startup"]
+        direction TB
+        Bot["<b>bot.py</b><br/>DB → migrations → ClickHouse<br/>→ blocklist → login"]
+        Version["core/version.py<br/>v2.1 + git commit"]
+        Logger["core/logger.py<br/>bot.log"]
     end
 
-    subgraph Utils ["Shared Utilities"]
-        Alerts[utils/alerts.py]
-        Autocomplete[utils/autocomplete.py]
-        Embeds[utils/embeds.py]
-        DND[utils/dnd.py]
-        Health
-        Pagination[utils/pagination.py]
+    subgraph Commands["⌨️ Command cogs"]
+        direction TB
+        Servers["<b>servers.py</b><br/>/servers /serverinfo /playing<br/>/findgametype /seed /trends"]
+        Stats["<b>stats.py</b><br/>/stats /find /alert_stats"]
+        Leaderboard["<b>leaderboard.py</b><br/>/leaderboard"]
+        Profile["<b>profile.py</b><br/>/profile"]
+        General["<b>general.py</b><br/>/about · live status"]
     end
 
-    Cogs -->|Uses| DB
-    Cogs -->|Uses| Autocomplete
-    Subs -->|Sends via| Alerts
-    Watch -->|Sends via| Alerts
-    Digest -->|Sends via| Alerts
-    Subs -->|Builds with| Embeds
-    Watch -->|Builds with| Embeds
-    Subs -->|Uses| DND
-    Watch -->|Uses| DND
+    subgraph Loops["🔔 Alert cogs · background loops"]
+        direction TB
+        Subs["<b>subscriptions.py</b><br/>map changes 45s · rounds 60s<br/>up/down 60s · /dnd"]
+        Watch["<b>watchlist.py</b><br/>player joins 45s · /squad"]
+        Digest["<b>digest.py</b><br/>daily summary"]
+    end
 
-    DB --> PostgreSQL[(PostgreSQL)]
-    DB -.->|Optional| ClickHouse[(ClickHouse)]
+    subgraph Utils["🧰 Shared utils"]
+        direction TB
+        Send["alerts.py<br/>send · blocklist · back-off"]
+        Embeds["embeds.py<br/>captheflag.com links · server fields"]
+        DND["dnd.py<br/>quiet hours"]
+        Auto["autocomplete.py"]
+        Pages["pagination.py"]
+        Health["health.py"]
+    end
+
+    DB["<b>core/database.py</b><br/>queries · caches · migrations"]
+    PG[("🐘 PostgreSQL<br/>stats engine + bot tables")]
+    CH[("⚡ ClickHouse<br/>optional")]
+    Webhook(["🚨 Error webhook"])
+
+    Discord <==> Bot
+    Bot --> Commands & Loops
+    Bot -- errors --> Health --> Webhook
+    Commands --> Auto
+    Servers --> Pages
+    General --> Version
+    Subs & Watch --> DND
+    Subs & Watch --> Embeds
+    Loops --> Send --> Discord
+    Commands & Loops --> DB
+    Auto --> DB
+    DB --> PG
+    DB -.-> CH
+
+    classDef entry fill:#3b4a2a,stroke:#9bb05f,color:#f1f5e6
+    classDef cmd fill:#1f3a5f,stroke:#5b8fd1,color:#e8f0fb
+    classDef loop fill:#5a3d12,stroke:#d9a441,color:#fdf3e0
+    classDef util fill:#33363d,stroke:#8a8f99,color:#eceef1
+    classDef store fill:#2d2440,stroke:#9b7fd4,color:#f1ecfb
+    classDef ext fill:#14532d,stroke:#4ade80,color:#ecfdf5
+    class Bot,Version,Logger entry
+    class Servers,Stats,Leaderboard,Profile,General cmd
+    class Subs,Watch,Digest loop
+    class Send,Embeds,DND,Auto,Pages,Health util
+    class DB,PG,CH store
+    class Discord,Webhook ext
 ```
+
+**How an alert flows:** a background loop polls the stats database → spots a change (new map, finished round, server down, watched player joined) → looks up subscribers and skips anyone paused, blocked or in quiet hours → builds the embed with `embeds.py` → `alerts.py` delivers it to the channel or DM, backing off from destinations that keep failing.
 
 *   **`bot.py`**: Entry point. Connects the database, runs migrations, connects ClickHouse and loads the blocklist *before* logging in to Discord, so background tasks always start with a working database. Loads extensions and syncs slash commands.
 *   **`core/database.py`**: Centralized SQL query manager with Postgres and ClickHouse support. Caches the map list (10 min) and whole-history aggregates for `/stats` and `/leaderboard` (5 min).
+*   **`core/version.py`**: Application version (`__version__`, matches the git tag) and the deployed commit, read from `.git`.
 *   **`core/logger.py`**: Console + rotating file logging (`bot.log` in the project root, 5 × 5 MB).
 *   **`utils/alerts.py`**: Shared alert sender for channels and DMs. Respects the blocklist, pauses DMs for 24h to users who have them closed, and removes subscriptions for channels that stay unreachable.
 *   **`utils/autocomplete.py`**: Shared server / map / gametype / player autocomplete callbacks.
@@ -82,7 +118,7 @@ graph TD
     *   `leaderboard.py`: V5 score leaderboards.
     *   `profile.py`: Player profile lookup.
     *   `digest.py`: Daily activity digest.
-    *   `general.py`: Dynamic status presence.
+    *   `general.py`: `/about`, dynamic status presence.
 
 The bot only requests the `guilds` gateway intent. Slash commands arrive as interactions, and alerts only need the guild/channel cache, so no privileged intents are required.
 
@@ -185,10 +221,17 @@ Alerts can be posted to a channel (the bot needs **Send Messages** and **Embed L
 *   **/digest_subscribe `[channel]`**: Receive a daily summary shortly after midnight UTC (sent once a day, not affected by DND).
 *   **/digest_unsubscribe**: Stop receiving digests.
 
+### ℹ️ General
+*   **/about**: Bot version and deployed commit, uptime, latency, and links to captheflag.com, the server browser and round stats.
+
 ### 📈 Stats
 *   **/stats**: Global stats — total rounds, unique players, currently active, popular maps (7 days).
 *   **/find `[player]`**: See which server a player is on right now.
 *   **/alert_stats**: View the most popular subscribed maps/servers.
+
+## Versioning
+
+The version lives in `core/version.py` and matches a git tag (`2.0`, `2.1`, …). To release, bump `__version__`, commit, then `git tag <version> && git push origin <version>`. `/about` and the startup log show the version plus the deployed commit, so you can always tell exactly what's running.
 
 ## Database Tables
 
