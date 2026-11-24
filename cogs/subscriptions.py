@@ -16,6 +16,9 @@ SERVER_SUB_MAP_NAME = "*all*"
 # start per day, so this comfortably covers any round still running.
 ROUND_ID_WINDOW = 5000
 
+# Persisted map / up-down state older than this is ignored on startup
+STATE_MAX_AGE_SECONDS = 600
+
 # Helper Constants for DND
 DAY_MAP = {
     "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6
@@ -456,7 +459,7 @@ class SubscriptionCommands(commands.Cog):
                     self.last_known_maps[server_name] = server_data['current_map']
                 logger.info("Initial map state populated.")
                 # Save to DB
-                await self.db.set_bot_state("last_known_maps", self.last_known_maps)
+                await self.db.set_bot_state_stamped("last_known_maps", self.last_known_maps)
                 return
 
             for server_name, server_data in online_servers.items():
@@ -515,7 +518,7 @@ class SubscriptionCommands(commands.Cog):
                 self.last_known_maps[server_name] = server_data['current_map']
 
             # Persist to DB
-            await self.db.set_bot_state("last_known_maps", self.last_known_maps)
+            await self.db.set_bot_state_stamped("last_known_maps", self.last_known_maps)
 
         except Exception as e:
             logger.error(f"Error in background task: {e}")
@@ -523,9 +526,10 @@ class SubscriptionCommands(commands.Cog):
     @check_map_changes.before_loop
     async def before_check_map_changes(self):
         await self.bot.wait_until_ready()
-        # Load persisted state
+        # Load persisted state, unless the bot was down long enough that
+        # "changes" since then would be stale news
         try:
-            saved = await self.db.get_bot_state("last_known_maps")
+            saved = await self.db.get_bot_state_if_fresh("last_known_maps", STATE_MAX_AGE_SECONDS)
             if saved and isinstance(saved, dict):
                 self.last_known_maps = saved
                 logger.info(f"Loaded last_known_maps from DB ({len(saved)} servers).")
@@ -677,7 +681,7 @@ class SubscriptionCommands(commands.Cog):
                         continue
                     await self._send_alert(embed, clean_content, sub.get("channel_id"), sub["user_id"])
 
-            await self.db.set_bot_state("last_known_server_states", self.last_known_server_states)
+            await self.db.set_bot_state_stamped("last_known_server_states", self.last_known_server_states)
 
         except Exception as e:
             logger.error(f"Error in server updown task: {e}")
@@ -686,7 +690,7 @@ class SubscriptionCommands(commands.Cog):
     async def before_check_server_updown(self):
         await self.bot.wait_until_ready()
         try:
-            saved = await self.db.get_bot_state("last_known_server_states")
+            saved = await self.db.get_bot_state_if_fresh("last_known_server_states", STATE_MAX_AGE_SECONDS)
             if saved and isinstance(saved, dict):
                 self.last_known_server_states = saved
                 logger.info(f"Loaded last_known_server_states from DB ({len(saved)} servers).")

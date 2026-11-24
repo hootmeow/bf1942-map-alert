@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import os
+import sys
 import traceback
 from dotenv import load_dotenv
 from core.database import Database
@@ -66,24 +67,14 @@ class BF1942Bot(commands.Bot):
             except Exception as e:
                 logger.error(f"Failed to load extension {ext}: {e}")
 
-    async def on_ready(self):
-        logger.info(f"Logged in as {self.user} (ID: {self.user.id})")
+    async def start(self, token: str, *, reconnect: bool = True):
+        """Connect the database before logging in.
 
-        # on_ready fires again on every gateway reconnect — only run the
-        # migrations/blocklist/command-sync work once per process.
-        if self._startup_done:
-            return
-        self._startup_done = True
+        Background tasks start as soon as the gateway is ready, so the pool
+        (and the state their before_loop hooks load) must exist by then.
+        """
+        await self.db.connect()
 
-        # Connect to Database if not already connected
-        if not self.db.pool:
-            try:
-                await self.db.connect()
-            except Exception as e:
-                logger.critical(f"Failed to connect to database on startup: {e}")
-                return
-
-        # Run startup migrations
         try:
             await self.db.run_migrations()
         except Exception as e:
@@ -102,6 +93,17 @@ class BF1942Bot(commands.Bot):
             logger.error(f"Failed to load blocklist: {e}")
             self.blocked_user_ids = set(ENV_BLOCKED_USERS)
             self.blocked_guild_ids = set(ENV_BLOCKED_GUILDS)
+
+        await super().start(token, reconnect=reconnect)
+
+    async def on_ready(self):
+        logger.info(f"Logged in as {self.user} (ID: {self.user.id})")
+
+        # on_ready fires again on every gateway reconnect — only sync
+        # commands once per process.
+        if self._startup_done:
+            return
+        self._startup_done = True
 
         await self.sync_commands()
         logger.info("Slash commands synced.")
@@ -167,3 +169,5 @@ if __name__ == "__main__":
         bot.run(DISCORD_TOKEN)
     except Exception as e:
         logger.critical(f"Failed to run bot: {e}")
+        # Non-zero exit so systemd's Restart=on-failure retries (e.g. DB not up yet)
+        sys.exit(1)

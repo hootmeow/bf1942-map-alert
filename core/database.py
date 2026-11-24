@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import List, Optional, Dict, Any, Union
 
 logger = logging.getLogger("bf1942_bot")
@@ -193,6 +194,18 @@ class Database:
             """,
             key, val
         )
+
+    async def set_bot_state_stamped(self, key: str, value: Any):
+        """Store value with a save time so it can be ignored once stale."""
+        await self.set_bot_state(key, {"saved_at": time.time(), "value": value})
+
+    async def get_bot_state_if_fresh(self, key: str, max_age_seconds: float) -> Any:
+        """Value saved by set_bot_state_stamped, or None if missing/older than max_age_seconds."""
+        saved = await self.get_bot_state(key)
+        if isinstance(saved, dict) and "saved_at" in saved:
+            if time.time() - saved["saved_at"] <= max_age_seconds:
+                return saved["value"]
+        return None
 
     # --- Blocklist ---
 
