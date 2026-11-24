@@ -19,6 +19,21 @@ _channel_failures = {}  # {channel_id: (count, first_failure_ts)}
 _dm_failures = {}       # {user_id: consecutive Forbidden count}
 _dm_muted_until = {}    # {user_id: ts}
 
+# fetch_user is an API call and its result isn't cached by the client (no
+# members intent), so keep the User objects; that also reuses their DM channel.
+USER_CACHE_MAX = 5000
+_users = {}             # {user_id: discord.User}
+
+
+async def _get_user(bot, user_id):
+    user = _users.get(user_id) or bot.get_user(user_id)
+    if user is None:
+        user = await bot.fetch_user(user_id)
+    if len(_users) >= USER_CACHE_MAX:
+        _users.clear()
+    _users[user_id] = user
+    return user
+
 
 async def _channel_failed(bot, channel_id, reason):
     count, first = _channel_failures.get(channel_id, (0, time.time()))
@@ -82,7 +97,7 @@ async def send_alert(bot, embed, clean_content, channel_id, user_id) -> bool:
         del _dm_muted_until[user_id]
 
     try:
-        user = await bot.fetch_user(user_id)
+        user = await _get_user(bot, user_id)
         await user.send(content=clean_content, embed=embed)
         _dm_failures.pop(user_id, None)
         return True

@@ -148,6 +148,7 @@ class Watchlist(commands.Cog):
             subs = await self.db.get_watchlist_subscribers(just_joined_names)
 
             now_utc = datetime.datetime.now(pytz.utc)
+            server_details = {}  # one lookup per server per poll
 
             for sub in subs:
                 user_id = sub['user_id']
@@ -165,7 +166,9 @@ class Watchlist(commands.Cog):
                     continue
 
                 # --- Enriched alert: get server details ---
-                server_detail = await self.db.get_server_details(server_name)
+                if server_name not in server_details:
+                    server_details[server_name] = await self.db.get_server_details(server_name)
+                server_detail = server_details[server_name]
 
                 # --- Send Alert ---
                 embed = discord.Embed(
