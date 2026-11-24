@@ -3,7 +3,10 @@ import sys
 from logging.handlers import RotatingFileHandler
 import os
 
-def setup_logger(name: str = "bf1942_bot", log_file: str = "bot.log", level: int = logging.INFO) -> logging.Logger:
+# bot.log lives in the project root regardless of the working directory
+DEFAULT_LOG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bot.log")
+
+def setup_logger(name: str = "bf1942_bot", log_file: str = DEFAULT_LOG_FILE, level: int = logging.INFO) -> logging.Logger:
     """
     Sets up a logger with both console and file handlers.
     """
