@@ -3,7 +3,8 @@ import datetime
 import os
 from urllib.parse import quote
 
-SITE_URL = os.getenv("SITE_URL", "https://captheflag.com").rstrip("/")
+# `or` so an empty SITE_URL= line in .env still falls back to the default
+SITE_URL = (os.getenv("SITE_URL") or "https://captheflag.com").rstrip("/")
 GAME_URL = f"{SITE_URL}/bf1942"
 FOOTER_TEXT = "captheflag.com"
 
