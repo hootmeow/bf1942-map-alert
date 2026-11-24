@@ -5,9 +5,10 @@ import logging
 import datetime
 import pytz
 from core.database import Database
-from utils.dnd import is_in_dnd
 
 logger = logging.getLogger("bf1942_bot")
+
+DIGEST_SEND_WINDOW_HOURS = 6
 
 
 class DigestCommands(commands.Cog):
@@ -74,8 +75,10 @@ class DigestCommands(commands.Cog):
 
         now_utc = datetime.datetime.now(pytz.utc)
 
-        # Only fire near midnight UTC (between 00:00 and 00:04)
-        if now_utc.hour != 0 or now_utc.minute >= 5:
+        # Send on the first tick after midnight UTC. The window is a few hours
+        # wide so a restart around midnight doesn't skip the day; the
+        # last_digest_date guard below keeps it to once per day.
+        if now_utc.hour >= DIGEST_SEND_WINDOW_HOURS:
             return
 
         try:
@@ -121,10 +124,9 @@ class DigestCommands(commands.Cog):
 
             clean_content = f"BF1942 Daily Digest — {rounds_24h} rounds, {players_24h} players"
 
+            # DND isn't applied: the digest is sent once a day, so skipping it
+            # for anyone whose quiet hours cover midnight meant they never got it.
             for sub in subs:
-                if is_in_dnd(sub, now_utc):
-                    continue
-
                 channel_id = sub.get("channel_id")
                 user_id = sub["user_id"]
 
