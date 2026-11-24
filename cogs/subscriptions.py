@@ -19,6 +19,9 @@ ROUND_ID_WINDOW = 5000
 # Persisted map / up-down state older than this is ignored on startup
 STATE_MAX_AGE_SECONDS = 600
 
+# Polls (60s apart) a server must stay in a new state before an up/down alert
+UPDOWN_CONFIRM_POLLS = 2
+
 # Helper Constants for DND
 DAY_MAP = {
     "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6
@@ -53,6 +56,7 @@ class SubscriptionCommands(commands.Cog):
         self.last_known_maps = {}
         self.last_known_server_states = {}  # {server_name: bool (True=online)}
         self.announced_round_ids = None  # set of round ids already alerted; None = not loaded
+        self.pending_server_changes = {}  # {server_name: consecutive polls in the new state}
         self.check_map_changes.start()
         self.check_round_results.start()
         self.check_server_updown.start()
@@ -636,7 +640,7 @@ class SubscriptionCommands(commands.Cog):
 
             for row in rows:
                 server_name = row['current_server_name']
-                is_online = row['current_state'] in ('ACTIVE', 'EMPTY')
+                is_online = row['is_online']
                 was_online = self.last_known_server_states.get(server_name)
 
                 # First time seeing this server — record state without alerting
@@ -645,9 +649,18 @@ class SubscriptionCommands(commands.Cog):
                     continue
 
                 if is_online == was_online:
+                    self.pending_server_changes.pop(server_name, None)
                     continue
 
-                # State transition detected
+                # A single missed query shouldn't page anyone: require the new
+                # state on consecutive polls before alerting
+                seen = self.pending_server_changes.get(server_name, 0) + 1
+                if seen < UPDOWN_CONFIRM_POLLS:
+                    self.pending_server_changes[server_name] = seen
+                    continue
+                self.pending_server_changes.pop(server_name, None)
+
+                # State transition confirmed
                 self.last_known_server_states[server_name] = is_online
                 subs = await self.db.get_server_updown_subscribers(server_name)
                 if not subs:

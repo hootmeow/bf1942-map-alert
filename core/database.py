@@ -902,12 +902,19 @@ class Database:
         return await self.fetch(sql, server_name)
 
     async def get_subscribed_server_states(self) -> List[asyncpg.Record]:
-        """Returns the current state of all servers that have at least one up/down subscriber."""
+        """Online/offline per subscribed server name.
+
+        Several servers rows can share a name (e.g. an old ip:port left OFFLINE
+        next to the live one), so group by name: online if any row is.
+        """
         sql = """
-        SELECT DISTINCT s.current_server_name, s.current_state,
-               s.current_player_count, s.current_max_players
+        SELECT s.current_server_name,
+               bool_or(s.current_state IN ('ACTIVE', 'EMPTY')) AS is_online,
+               MAX(s.current_player_count) FILTER (WHERE s.current_state IN ('ACTIVE', 'EMPTY')) AS current_player_count,
+               MAX(s.current_max_players) FILTER (WHERE s.current_state IN ('ACTIVE', 'EMPTY')) AS current_max_players
         FROM servers s
-        JOIN server_updown_subscriptions sus ON sus.server_name = s.current_server_name
+        WHERE s.current_server_name IN (SELECT server_name FROM server_updown_subscriptions)
+        GROUP BY s.current_server_name
         """
         return await self.fetch(sql)
 
