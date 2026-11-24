@@ -10,6 +10,7 @@ from core.database import Database
 from utils.alerts import send_alert
 from utils.autocomplete import search_maps, search_servers
 from utils.dnd import is_in_dnd
+from utils import embeds
 
 logger = logging.getLogger("bf1942_bot")
 
@@ -458,10 +459,16 @@ class SubscriptionCommands(commands.Cog):
                         server_name, current_map.lower(), SERVER_SUB_MAP_NAME
                     )
 
+                    if not subs_to_alert:
+                        continue
+
                     player_count = server_data['current_player_count']
 
-                    # Enriched alert: get previous round result
-                    prev_round = await self.db.get_last_round_for_server(server_name)
+                    # Enriched alert: previous round result + live server details
+                    prev_round, detail = await asyncio.gather(
+                        self.db.get_last_round_for_server(server_name),
+                        self.db.get_server_details(server_name),
+                    )
 
                     for sub in subs_to_alert:
                         if player_count <= sub.get("players_over", 0):
@@ -471,30 +478,39 @@ class SubscriptionCommands(commands.Cog):
                             logger.info(f"Skipping alert for user {sub['user_id']} due to DND.")
                             continue
 
+                        server_label = embeds.link(server_name, embeds.server_url(detail['server_id'])) if detail else f"**{server_name}**"
                         if sub['map_name'] == SERVER_SUB_MAP_NAME:
                             title = "BF1942 Server Alert!"
-                            description = f"**{server_name}** has just changed maps to **{current_map}**!"
+                            description = f"{server_label} has just changed maps to **{current_map}**"
                             clean_content = f"{server_name} changed map to {current_map}"
                         else:
                             title = "BF1942 Map Alert!"
-                            description = f"The map **{current_map}** has just started on **{server_name}**!"
+                            description = f"The map **{current_map}** has just started on {server_label}"
                             clean_content = f"Map {current_map} started on {server_name}"
+                        if last_map:
+                            description += f" (was {last_map})"
+                        description += "!"
 
                         embed = discord.Embed(
-                            title=title, description=description, color=discord.Color.gold()
+                            title=title, description=description, color=discord.Color.gold(),
+                            timestamp=now_utc,
                         )
-                        embed.add_field(name="Players", value=f"{player_count}/{server_data['current_max_players']}")
+                        if detail:
+                            embeds.add_server_fields(embed, detail)
+                        else:
+                            embed.add_field(name="Players", value=f"{player_count}/{server_data['current_max_players']}")
 
                         # Enriched: previous round info
                         if prev_round:
-                            winner = "Axis" if prev_round['winning_team'] == 1 else "Allies" if prev_round['winning_team'] == 2 else "Draw"
-                            duration = prev_round['duration_seconds'] or 0
-                            mins = duration // 60
+                            mins = (prev_round['duration_seconds'] or 0) // 60
+                            ended = f", ended {embeds.discord_time(prev_round['end_time'], 'R')}" if prev_round['end_time'] else ""
                             embed.add_field(
                                 name="Previous Round",
-                                value=f"{prev_round['map_name']} — Winner: **{winner}** ({mins}m)",
+                                value=(f"{embeds.link(prev_round['map_name'], embeds.round_url(prev_round['id']))} — "
+                                       f"Winner: **{embeds.winner_name(prev_round['winning_team'])}** ({mins}m{ended})"),
                                 inline=False
                             )
+                        embed.set_footer(text=embeds.FOOTER_TEXT)
 
                         await self._send_alert(embed, clean_content, sub.get("channel_id"), sub["user_id"])
 
@@ -551,20 +567,41 @@ class SubscriptionCommands(commands.Cog):
                     continue
 
                 # Build embed
-                winner = "Axis" if rnd['winning_team'] == 1 else "Allies" if rnd['winning_team'] == 2 else "Draw"
+                winner = embeds.winner_name(rnd['winning_team'])
                 duration = rnd['duration_seconds'] or 0
                 mins = duration // 60
 
+                all_players, detail = await asyncio.gather(
+                    self.db.get_round_top_players(round_id, limit=100),
+                    self.db.get_server_details(server_name),
+                )
+
                 embed = discord.Embed(
                     title="Round Complete!",
-                    description=f"**{server_name}**",
-                    color=discord.Color.dark_gold()
+                    url=embeds.round_url(round_id),
+                    description=embeds.link(server_name, embeds.server_url(rnd['server_id'])),
+                    color=discord.Color.dark_gold(),
+                    timestamp=rnd['end_time'] if rnd['end_time'].tzinfo else rnd['end_time'].replace(tzinfo=pytz.utc),
                 )
                 embed.add_field(name="Map", value=rnd['map_name'], inline=True)
                 embed.add_field(name="Winner", value=winner, inline=True)
                 embed.add_field(name="Duration", value=f"{mins}m", inline=True)
-
-                all_players = await self.db.get_round_top_players(round_id, limit=100)
+                if rnd['gamemode']:
+                    embed.add_field(name="Gametype", value=rnd['gamemode'], inline=True)
+                if rnd['start_time']:
+                    embed.add_field(name="Played",
+                                    value=f"{embeds.discord_time(rnd['start_time'])} – {embeds.discord_time(rnd['end_time'])}",
+                                    inline=True)
+                addr = embeds.address(rnd['ip'], rnd['current_game_port'])
+                if addr:
+                    embed.add_field(name="Address", value=f"`{addr}`", inline=True)
+                if all_players:
+                    embed.add_field(name="Players", value=str(len(all_players)), inline=True)
+                if detail and detail['current_map']:
+                    embed.add_field(name="Now Playing",
+                                    value=f"{detail['current_map']} ({detail['current_player_count']}/{detail['current_max_players']})",
+                                    inline=True)
+                embed.set_footer(text=f"{embeds.FOOTER_TEXT} · Round #{round_id}")
                 if all_players:
                     winning_team = rnd['winning_team']
                     axis = [p for p in all_players if p['team'] == 1]

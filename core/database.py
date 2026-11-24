@@ -385,7 +385,7 @@ class Database:
     async def get_server_details(self, server_name: str) -> Optional[asyncpg.Record]:
         sql = """
         SELECT
-            s.ip, s.port, s.current_server_name, s.current_map, s.current_player_count, s.current_max_players,
+            s.server_id, s.ip, s.port, s.current_server_name, s.current_map, s.current_player_count, s.current_max_players,
             s.current_gametype, s.current_game_port,
             lss.round_time_remain, lss.tickets1, lss.tickets2, lss.unpure_mods
         FROM servers s
@@ -583,7 +583,8 @@ class Database:
 
     async def get_all_online_players(self) -> List[asyncpg.Record]:
         sql = """
-        SELECT lps.player_name, s.current_server_name
+        SELECT lps.player_name, s.current_server_name,
+               lps.score, lps.kills, lps.deaths, lps.team
         FROM live_player_snapshot lps
         JOIN servers s ON lps.server_ip = s.ip AND lps.server_port = s.port
         WHERE s.current_state = 'ACTIVE';
@@ -616,7 +617,8 @@ class Database:
         sql = """
         SELECT r.round_id AS id, sv.current_server_name AS server_name,
                r.map_name, r.winner_team AS winning_team, r.duration_seconds,
-               r.start_time, r.end_time
+               r.start_time, r.end_time, r.gamemode,
+               sv.server_id, sv.ip, sv.current_game_port
         FROM rounds r
         JOIN servers sv ON r.server_id = sv.server_id
         WHERE r.round_id > (SELECT COALESCE(MAX(round_id), 0) FROM rounds) - $1
@@ -654,7 +656,7 @@ class Database:
     async def get_last_round_for_server(self, server_name: str) -> Optional[asyncpg.Record]:
         sql = """
         SELECT r.round_id AS id, r.map_name,
-               r.winner_team AS winning_team, r.duration_seconds
+               r.winner_team AS winning_team, r.duration_seconds, r.end_time
         FROM rounds r
         JOIN servers sv ON r.server_id = sv.server_id
         WHERE sv.current_server_name = $1 AND r.end_time IS NOT NULL

@@ -7,6 +7,7 @@ import pytz
 from core.database import Database
 from utils.alerts import send_alert
 from utils.dnd import is_in_dnd
+from utils import embeds
 
 logger = logging.getLogger("bf1942_bot")
 
@@ -129,6 +130,7 @@ class Watchlist(commands.Cog):
             # 1. Get all currently online players
             rows = await self.db.get_all_online_players()
             current_online = {r['player_name']: r['current_server_name'] for r in rows}
+            online_rows = {r['player_name']: r for r in rows}
             current_online_names = set(current_online.keys())
 
             # 2. Identify Just Joined (Present now, but NOT in previous cycle).
@@ -171,19 +173,23 @@ class Watchlist(commands.Cog):
                 server_detail = server_details[server_name]
 
                 # --- Send Alert ---
+                server_label = (embeds.link(server_name, embeds.server_url(server_detail['server_id']))
+                                if server_detail else f"**{server_name}**")
                 embed = discord.Embed(
                     title="Watchlist Alert",
-                    description=f"**{player_name}** just joined **{server_name}**!",
-                    color=discord.Color.magenta()
+                    description=f"{embeds.link(player_name, embeds.player_url(player_name))} just joined {server_label}!",
+                    color=discord.Color.magenta(),
+                    timestamp=now_utc,
                 )
 
                 if server_detail:
-                    map_name = server_detail['current_map'] or 'N/A'
-                    players = f"{server_detail['current_player_count']}/{server_detail['current_max_players']}"
-                    gametype = server_detail['current_gametype'] or 'N/A'
-                    embed.add_field(name="Map", value=map_name, inline=True)
-                    embed.add_field(name="Players", value=players, inline=True)
-                    embed.add_field(name="Gametype", value=gametype, inline=True)
+                    embed.add_field(name="Map", value=server_detail['current_map'] or 'N/A', inline=True)
+                    embeds.add_server_fields(embed, server_detail)
+
+                player_row = online_rows.get(player_name)
+                if player_row and player_row['team'] in (1, 2):
+                    embed.add_field(name="Team", value="Axis" if player_row['team'] == 1 else "Allies", inline=True)
+                embed.set_footer(text=embeds.FOOTER_TEXT)
 
                 clean_content = f"Watchlist: {player_name} joined {server_name}"
                 if await send_alert(self.bot, embed, clean_content, None, user_id):
