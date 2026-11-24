@@ -8,6 +8,7 @@ import asyncio
 import time
 from core.database import Database
 from utils.alerts import send_alert
+from utils.autocomplete import search_maps, search_servers
 from utils.dnd import is_in_dnd
 
 logger = logging.getLogger("bf1942_bot")
@@ -31,14 +32,6 @@ DAY_MAP = {
     "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6
 }
 DAY_NAMES = [ "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" ]
-
-async def search_servers(ctx: discord.AutocompleteContext):
-    db: Database = ctx.bot.db
-    return await db.get_server_suggestions(ctx.value)
-
-async def search_maps(ctx: discord.AutocompleteContext):
-    db: Database = ctx.bot.db
-    return await db.get_map_suggestions(ctx.value)
 
 async def search_timezones(ctx: discord.AutocompleteContext):
     """Provides suggestions for timezones."""

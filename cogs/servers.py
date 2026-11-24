@@ -4,24 +4,9 @@ from discord.ext import commands
 from discord.commands import Option
 import logging
 from core.database import Database
+from utils.autocomplete import search_gametypes, search_maps, search_servers
 
 logger = logging.getLogger("bf1942_bot")
-
-async def search_servers(ctx: discord.AutocompleteContext):
-    """Provides server name suggestions for autocomplete."""
-    db: Database = ctx.bot.db
-    return await db.get_server_suggestions(ctx.value)
-
-async def search_maps(ctx: discord.AutocompleteContext):
-    """Provides map name suggestions."""
-    db: Database = ctx.bot.db
-    return await db.get_map_suggestions(ctx.value)
-
-async def search_gametypes(ctx: discord.AutocompleteContext):
-    """Provides gametype suggestions."""
-    db: Database = ctx.bot.db
-    return await db.get_gametype_suggestions(ctx.value)
-
 
 class ServerCommands(commands.Cog):
     def __init__(self, bot):

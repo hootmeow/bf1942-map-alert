@@ -4,13 +4,9 @@ from discord.ext import commands
 from discord.commands import Option
 import logging
 from core.database import Database
+from utils.autocomplete import search_players
 
 logger = logging.getLogger("bf1942_bot")
-
-async def search_players(ctx: discord.AutocompleteContext):
-    db: Database = ctx.bot.db
-    return await db.get_player_suggestions(ctx.value)
-
 
 class ProfileCommands(commands.Cog):
     def __init__(self, bot):
