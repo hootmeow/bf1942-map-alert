@@ -1,8 +1,10 @@
 import asyncio
 import asyncpg
+import datetime
 import json
 import logging
 import os
+import pytz
 import re
 import time
 from typing import List, Optional, Dict, Any, Union
@@ -129,10 +131,45 @@ class Database:
             ALTER TABLE round_result_subscriptions
                 ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             """,
+            # DND rules evaluated in the user's own timezone (DST / half-hour offsets)
+            """
+            ALTER TABLE user_dnd_rules
+                ADD COLUMN IF NOT EXISTS start_hour_local INT,
+                ADD COLUMN IF NOT EXISTS end_hour_local INT,
+                ADD COLUMN IF NOT EXISTS weekdays_local INT[]
+            """,
         ]
         for sql in statements:
             await self.execute(sql)
+        await self._backfill_dnd_local()
         logger.info("Bot migrations complete.")
+
+    async def _backfill_dnd_local(self):
+        """Derive local hours/days for DND rules saved before they were stored."""
+        rows = await self.fetch(
+            "SELECT user_id, start_hour_utc, end_hour_utc, weekdays_utc, timezone "
+            "FROM user_dnd_rules WHERE start_hour_local IS NULL"
+        )
+        for row in rows:
+            try:
+                tz = pytz.timezone(row['timezone'])
+            except pytz.UnknownTimeZoneError:
+                tz = pytz.utc
+            today = datetime.datetime.now(pytz.utc).replace(minute=0, second=0, microsecond=0)
+            start_local = today.replace(hour=row['start_hour_utc']).astimezone(tz)
+            end_local = today.replace(hour=row['end_hour_utc']).astimezone(tz)
+            local_days = set()
+            for utc_day in row['weekdays_utc']:
+                offset = (utc_day - today.weekday()) % 7
+                start_utc = today.replace(hour=row['start_hour_utc']) + datetime.timedelta(days=offset)
+                local_days.add(start_utc.astimezone(tz).weekday())
+            await self.execute(
+                "UPDATE user_dnd_rules SET start_hour_local = $2, end_hour_local = $3, weekdays_local = $4 "
+                "WHERE user_id = $1",
+                row['user_id'], start_local.hour, end_local.hour, sorted(local_days)
+            )
+        if rows:
+            logger.info(f"Backfilled local DND hours for {len(rows)} rule(s).")
 
     # --- ClickHouse Integration ---
 
@@ -366,17 +403,23 @@ class Database:
 
     # --- DND Queries ---
 
-    async def upsert_dnd_rule(self, user_id: int, start_hour: int, end_hour: int, weekdays: List[int], timezone: str):
+    async def upsert_dnd_rule(self, user_id: int, start_hour: int, end_hour: int, weekdays: List[int], timezone: str,
+                              start_hour_local: int, end_hour_local: int, weekdays_local: List[int]):
         sql = """
-        INSERT INTO user_dnd_rules (user_id, start_hour_utc, end_hour_utc, weekdays_utc, timezone)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO user_dnd_rules (user_id, start_hour_utc, end_hour_utc, weekdays_utc, timezone,
+                                    start_hour_local, end_hour_local, weekdays_local)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (user_id) DO UPDATE SET
             start_hour_utc = EXCLUDED.start_hour_utc,
             end_hour_utc = EXCLUDED.end_hour_utc,
             weekdays_utc = EXCLUDED.weekdays_utc,
-            timezone = EXCLUDED.timezone;
+            timezone = EXCLUDED.timezone,
+            start_hour_local = EXCLUDED.start_hour_local,
+            end_hour_local = EXCLUDED.end_hour_local,
+            weekdays_local = EXCLUDED.weekdays_local;
         """
-        await self.execute(sql, user_id, start_hour, end_hour, weekdays, timezone)
+        await self.execute(sql, user_id, start_hour, end_hour, weekdays, timezone,
+                           start_hour_local, end_hour_local, weekdays_local)
 
     async def get_dnd_rule(self, user_id: int) -> Optional[asyncpg.Record]:
         sql = "SELECT * FROM user_dnd_rules WHERE user_id = $1"
@@ -447,7 +490,8 @@ class Database:
         sql = """
         SELECT
             s.user_id, s.players_over, s.channel_id, s.map_name,
-            dnd.start_hour_utc, dnd.end_hour_utc, dnd.weekdays_utc
+            dnd.start_hour_utc, dnd.end_hour_utc, dnd.weekdays_utc,
+               dnd.start_hour_local, dnd.end_hour_local, dnd.weekdays_local, dnd.timezone AS dnd_timezone
         FROM subscriptions s
         LEFT JOIN user_dnd_rules dnd ON s.user_id = dnd.user_id
         WHERE
@@ -480,7 +524,8 @@ class Database:
         sql = """
         SELECT
             w.user_id, w.player_name,
-            dnd.start_hour_utc, dnd.end_hour_utc, dnd.weekdays_utc
+            dnd.start_hour_utc, dnd.end_hour_utc, dnd.weekdays_utc,
+               dnd.start_hour_local, dnd.end_hour_local, dnd.weekdays_local, dnd.timezone AS dnd_timezone
         FROM player_watchlist w
         LEFT JOIN user_dnd_rules dnd ON w.user_id = dnd.user_id
         WHERE w.player_name = ANY($1::text[]);
@@ -549,7 +594,8 @@ class Database:
     async def get_round_result_subscribers(self, server_name: str) -> List[asyncpg.Record]:
         sql = """
         SELECT rrs.user_id, rrs.channel_id, rrs.created_at,
-               dnd.start_hour_utc, dnd.end_hour_utc, dnd.weekdays_utc
+               dnd.start_hour_utc, dnd.end_hour_utc, dnd.weekdays_utc,
+               dnd.start_hour_local, dnd.end_hour_local, dnd.weekdays_local, dnd.timezone AS dnd_timezone
         FROM round_result_subscriptions rrs
         LEFT JOIN user_dnd_rules dnd ON rrs.user_id = dnd.user_id
         WHERE rrs.server_name = $1
@@ -784,7 +830,8 @@ class Database:
     async def get_all_digest_subscriptions(self) -> List[asyncpg.Record]:
         sql = """
         SELECT ds.user_id, ds.channel_id,
-               dnd.start_hour_utc, dnd.end_hour_utc, dnd.weekdays_utc
+               dnd.start_hour_utc, dnd.end_hour_utc, dnd.weekdays_utc,
+               dnd.start_hour_local, dnd.end_hour_local, dnd.weekdays_local, dnd.timezone AS dnd_timezone
         FROM digest_subscriptions ds
         LEFT JOIN user_dnd_rules dnd ON ds.user_id = dnd.user_id
         """
@@ -846,7 +893,8 @@ class Database:
     async def get_server_updown_subscribers(self, server_name: str) -> List[asyncpg.Record]:
         sql = """
         SELECT sus.user_id, sus.channel_id,
-               dnd.start_hour_utc, dnd.end_hour_utc, dnd.weekdays_utc
+               dnd.start_hour_utc, dnd.end_hour_utc, dnd.weekdays_utc,
+               dnd.start_hour_local, dnd.end_hour_local, dnd.weekdays_local, dnd.timezone AS dnd_timezone
         FROM server_updown_subscriptions sus
         LEFT JOIN user_dnd_rules dnd ON sus.user_id = dnd.user_id
         WHERE sus.server_name = $1

@@ -367,7 +367,11 @@ class SubscriptionCommands(commands.Cog):
                 utc_days.add(test_date.astimezone(pytz.utc).weekday())
 
         try:
-            await self.db.upsert_dnd_rule(ctx.author.id, start_utc.hour, end_utc.hour, list(utc_days), timezone)
+            # UTC columns are kept for older code paths; matching uses the local ones
+            await self.db.upsert_dnd_rule(
+                ctx.author.id, start_utc.hour, end_utc.hour, list(utc_days), user_tz.zone,
+                start_hour, end_hour, sorted(set(day_list))
+            )
             day_names_str = ", ".join([DAY_NAMES[i] for i in day_list])
             await ctx.followup.send(f"DND schedule set!\n"
                                     f"Alerts blocked from **{start_hour:02d}:00** to **{end_hour:02d}:00** ({timezone})\n"
@@ -385,22 +389,11 @@ class SubscriptionCommands(commands.Cog):
                 await ctx.followup.send("You do not have a DND schedule set.")
                 return
 
-            user_tz = pytz.timezone(rule['timezone'])
-            now_utc = datetime.datetime.now(pytz.utc)
-            start_utc = now_utc.replace(hour=rule['start_hour_utc'], minute=0)
-            end_utc = now_utc.replace(hour=rule['end_hour_utc'], minute=0)
-            start_local = start_utc.astimezone(user_tz)
-            end_local = end_utc.astimezone(user_tz)
-
-            local_days = set()
-            for i in range(7):
-                if i in rule['weekdays_utc']:
-                    local_days.add(DAY_NAMES[i])
-            day_names_str = ", ".join(sorted(list(local_days), key=lambda d: DAY_NAMES.index(d)))
+            day_names_str = ", ".join(DAY_NAMES[i] for i in sorted(rule['weekdays_local'] or []))
 
             await ctx.followup.send(f"**Your DND Schedule:**\n"
-                                    f"Alerts blocked from **{start_local.hour:02d}:00** to **{end_local.hour:02d}:00** ({rule['timezone']})\n"
-                                    f"Days (UTC relative): **{day_names_str}**")
+                                    f"Alerts blocked from **{rule['start_hour_local']:02d}:00** to **{rule['end_hour_local']:02d}:00** ({rule['timezone']})\n"
+                                    f"Starting on: **{day_names_str}**")
         except Exception as e:
             logger.error(f"Error in /dnd view: {e}")
             await ctx.followup.send("Something went wrong.")
