@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord.ext import commands
 from discord.commands import Option
@@ -27,7 +28,16 @@ class ProfileCommands(commands.Cog):
     ):
         await ctx.defer(ephemeral=False)
         try:
-            stats = await self.db.get_player_lifetime_stats(player_name)
+            # Independent queries: run them concurrently (each takes its own
+            # pool connection; ClickHouse runs in a worker thread)
+            stats, playtime_secs, bests, top_maps, top_servers, recent = await asyncio.gather(
+                self.db.get_player_lifetime_stats(player_name),
+                self.db.get_player_playtime_seconds(player_name),
+                self.db.get_player_personal_bests(player_name),
+                self.db.get_player_top_maps(player_name),
+                self.db.get_player_top_servers(player_name),
+                self.db.get_player_recent_rounds(player_name),
+            )
             if not stats:
                 await ctx.followup.send(f"No data found for **{player_name}**.")
                 return
@@ -50,13 +60,11 @@ class ProfileCommands(commands.Cog):
             embed.add_field(name="Win Rate", value=f"{wins:,}W ({win_rate})", inline=True)
 
             # Estimated playtime from ClickHouse
-            playtime_secs = await self.db.get_player_playtime_seconds(player_name)
             if playtime_secs > 0:
                 hours = playtime_secs // 3600
                 embed.add_field(name="Est. Playtime", value=f"{hours:,}h", inline=True)
 
             # Personal bests
-            bests = await self.db.get_player_personal_bests(player_name)
             if bests and bests['best_score']:
                 embed.add_field(
                     name="Personal Bests",
@@ -65,19 +73,16 @@ class ProfileCommands(commands.Cog):
                 )
 
             # Top maps
-            top_maps = await self.db.get_player_top_maps(player_name)
             if top_maps:
                 map_lines = [f"{m['map_name']} ({m['play_count']} rounds)" for m in top_maps]
                 embed.add_field(name="Top Maps", value="\n".join(map_lines), inline=True)
 
             # Top servers
-            top_servers = await self.db.get_player_top_servers(player_name)
             if top_servers:
                 srv_lines = [f"{s['server_name']} ({s['play_count']})" for s in top_servers]
                 embed.add_field(name="Top Servers", value="\n".join(srv_lines), inline=True)
 
             # Recent rounds
-            recent = await self.db.get_player_recent_rounds(player_name)
             if recent:
                 recent_lines = []
                 for r in recent:

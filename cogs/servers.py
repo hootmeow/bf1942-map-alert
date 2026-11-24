@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord.ext import commands
 from discord.commands import Option
@@ -208,8 +209,15 @@ class ServerCommands(commands.Cog):
                 color=discord.Color.teal()
             )
 
+            # Postgres + ClickHouse lookups are independent: run them concurrently
+            top_players, popular_maps, pop_trend, peak_hours = await asyncio.gather(
+                self.db.get_server_top_players_24h(server),
+                self.db.get_server_popular_maps_24h(server),
+                self.db.get_server_population_trend(server),
+                self.db.get_server_peak_hours(server),
+            )
+
             # Top players last 24h (Postgres)
-            top_players = await self.db.get_server_top_players_24h(server)
             if top_players:
                 lines = [
                     f"**{p['player_name']}** — {p['total_score']:,} pts ({p['total_kills']:,} kills)"
@@ -220,13 +228,11 @@ class ServerCommands(commands.Cog):
                 embed.add_field(name="Top Players (24h)", value="No round data in the last 24h.", inline=False)
 
             # Popular maps last 24h (Postgres)
-            popular_maps = await self.db.get_server_popular_maps_24h(server)
             if popular_maps:
                 map_lines = [f"**{m['map_name']}** — {m['play_count']} rounds" for m in popular_maps]
                 embed.add_field(name="Popular Maps (24h)", value="\n".join(map_lines), inline=False)
 
             # Population trend (ClickHouse)
-            pop_trend = await self.db.get_server_population_trend(server)
             if pop_trend:
                 recent = pop_trend[-6:]  # last 6 hours
                 trend_lines = [
@@ -236,7 +242,6 @@ class ServerCommands(commands.Cog):
                 embed.add_field(name="Population Trend (Recent)", value="\n".join(trend_lines), inline=False)
 
             # Peak hours (ClickHouse)
-            peak_hours = await self.db.get_server_peak_hours(server)
             if peak_hours:
                 top3 = sorted(peak_hours, key=lambda x: x['avg_players'], reverse=True)[:3]
                 peak_lines = [f"{int(h['hour_of_day']):02d}:00 UTC — {h['avg_players']:.1f} avg" for h in top3]
