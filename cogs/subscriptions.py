@@ -5,6 +5,7 @@ import logging
 import pytz
 import datetime
 import asyncio
+import time
 from core.database import Database
 from utils.alerts import send_alert
 from utils.dnd import is_in_dnd
@@ -19,6 +20,8 @@ ROUND_ID_WINDOW = 5000
 
 # Persisted map / up-down state older than this is ignored on startup
 STATE_MAX_AGE_SECONDS = 600
+# Unchanged state is still re-saved this often to keep its stamp fresh
+STATE_REFRESH_SECONDS = 120
 
 # Polls (60s apart) a server must stay in a new state before an up/down alert
 UPDOWN_CONFIRM_POLLS = 2
@@ -58,6 +61,7 @@ class SubscriptionCommands(commands.Cog):
         self.last_known_server_states = {}  # {server_name: bool (True=online)}
         self.announced_round_ids = None  # set of round ids already alerted; None = not loaded
         self.pending_server_changes = {}  # {server_name: consecutive polls in the new state}
+        self._persisted = {}  # {state key: (last saved value, monotonic time)}
         self.check_map_changes.start()
         self.check_round_results.start()
         self.check_server_updown.start()
@@ -416,6 +420,17 @@ class SubscriptionCommands(commands.Cog):
             await ctx.respond("Something went wrong.", ephemeral=True)
 
     # --- Shared alert sender ---
+    async def _persist_state(self, key, value):
+        """Save stamped state when it changed, or every STATE_REFRESH_SECONDS so
+        the saved_at stamp stays fresh for get_bot_state_if_fresh on restart."""
+        snapshot = dict(value)
+        last = self._persisted.get(key)
+        now = time.monotonic()
+        if last and last[0] == snapshot and now - last[1] < STATE_REFRESH_SECONDS:
+            return
+        await self.db.set_bot_state_stamped(key, snapshot)
+        self._persisted[key] = (snapshot, now)
+
     async def _send_alert(self, embed, clean_content, channel_id, user_id):
         """Send an alert to a channel or DM."""
         await send_alert(self.bot, embed, clean_content, channel_id, user_id)
@@ -436,8 +451,7 @@ class SubscriptionCommands(commands.Cog):
                 for server_name, server_data in online_servers.items():
                     self.last_known_maps[server_name] = server_data['current_map']
                 logger.info("Initial map state populated.")
-                # Save to DB
-                await self.db.set_bot_state_stamped("last_known_maps", self.last_known_maps)
+                await self._persist_state("last_known_maps", self.last_known_maps)
                 return
 
             for server_name, server_data in online_servers.items():
@@ -495,8 +509,7 @@ class SubscriptionCommands(commands.Cog):
             for server_name, server_data in online_servers.items():
                 self.last_known_maps[server_name] = server_data['current_map']
 
-            # Persist to DB
-            await self.db.set_bot_state_stamped("last_known_maps", self.last_known_maps)
+            await self._persist_state("last_known_maps", self.last_known_maps)
 
         except Exception as e:
             logger.error(f"Error in background task: {e}")
@@ -668,7 +681,7 @@ class SubscriptionCommands(commands.Cog):
                         continue
                     await self._send_alert(embed, clean_content, sub.get("channel_id"), sub["user_id"])
 
-            await self.db.set_bot_state_stamped("last_known_server_states", self.last_known_server_states)
+            await self._persist_state("last_known_server_states", self.last_known_server_states)
 
         except Exception as e:
             logger.error(f"Error in server updown task: {e}")
