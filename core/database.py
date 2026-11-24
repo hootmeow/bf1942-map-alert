@@ -158,6 +158,12 @@ class Database:
                 ADD COLUMN IF NOT EXISTS end_hour_local INT,
                 ADD COLUMN IF NOT EXISTS weekdays_local INT[]
             """,
+            # Alert loops look subscriptions up by server / player; the primary
+            # keys lead with user_id so they can't serve those lookups.
+            "CREATE INDEX IF NOT EXISTS idx_subscriptions_server ON subscriptions (server_name)",
+            "CREATE INDEX IF NOT EXISTS idx_round_result_subs_server ON round_result_subscriptions (server_name)",
+            "CREATE INDEX IF NOT EXISTS idx_server_updown_subs_server ON server_updown_subscriptions (server_name)",
+            "CREATE INDEX IF NOT EXISTS idx_player_watchlist_player ON player_watchlist (player_name)",
         ]
         for sql in statements:
             await self.execute(sql)
