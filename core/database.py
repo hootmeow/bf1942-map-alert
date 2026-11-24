@@ -14,6 +14,7 @@ logger = logging.getLogger("bf1942_bot")
 LIKE_META_CHARS = re.compile(r"([%_\\])")
 
 MAP_LIST_TTL_SECONDS = 600
+AGGREGATE_TTL_SECONDS = 300
 
 
 class Database:
@@ -23,6 +24,7 @@ class Database:
         self.ch_client = None
         self._map_names: Optional[List[str]] = None
         self._map_names_loaded_at = 0.0
+        self._result_cache: Dict[Any, tuple] = {}
 
     async def connect(self):
         """Creates the database connection pool."""
@@ -56,6 +58,20 @@ class Database:
         if not self.pool:
             raise RuntimeError("Database not connected")
         return await self.pool.fetchrow(query, *args)
+
+    async def _cached(self, key, ttl_seconds: float, load):
+        """Return load()'s result, reusing it for ttl_seconds.
+
+        For whole-history aggregates (/stats, /leaderboard) that are expensive
+        and only change slowly.
+        """
+        now = time.monotonic()
+        hit = self._result_cache.get(key)
+        if hit and now - hit[0] < ttl_seconds:
+            return hit[1]
+        value = await load()
+        self._result_cache[key] = (now, value)
+        return value
 
     # --- Startup Migrations ---
 
@@ -487,7 +503,7 @@ class Database:
             (SELECT COUNT(*) FROM rounds) AS total_rounds,
             (SELECT COUNT(DISTINCT player_id) FROM round_player_stats) AS unique_players
         """
-        return await self.fetchrow(sql)
+        return await self._cached("global_stats", AGGREGATE_TTL_SECONDS, lambda: self.fetchrow(sql))
 
     async def get_active_player_count(self) -> int:
         sql = """
@@ -508,7 +524,8 @@ class Database:
         ORDER BY play_count DESC
         LIMIT $1
         """
-        return await self.fetch(sql, limit)
+        return await self._cached(("popular_maps_7d", limit), AGGREGATE_TTL_SECONDS,
+                                  lambda: self.fetch(sql, limit))
 
     # --- Background Task Queries ---
 
@@ -686,7 +703,8 @@ class Database:
         LIMIT ${param_idx}
         """
         params.append(limit)
-        return await self.fetch(sql, *params)
+        return await self._cached(("leaderboard", period, server_name, limit), AGGREGATE_TTL_SECONDS,
+                                  lambda: self.fetch(sql, *params))
 
     # --- Player Profile Queries ---
 
