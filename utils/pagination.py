@@ -3,7 +3,8 @@ from discord.ext import commands
 
 class SimplePaginationView(discord.ui.View):
     def __init__(self, items, per_page=10, title="List", timeout=180):
-        super().__init__(timeout=timeout)
+        # Grey the buttons out when they stop working instead of leaving them clickable
+        super().__init__(timeout=timeout, disable_on_timeout=True)
         self.items = items
         self.per_page = per_page
         self.title = title
@@ -58,7 +59,8 @@ class ServerPaginationView(discord.ui.View):
     because we want fancy fielding, not just a list of strings in description.
     """
     def __init__(self, servers, per_page=10, timeout=180):
-        super().__init__(timeout=timeout)
+        # Grey the buttons out when they stop working instead of leaving them clickable
+        super().__init__(timeout=timeout, disable_on_timeout=True)
         self.servers = servers
         self.per_page = per_page
         self.current_page = 0
