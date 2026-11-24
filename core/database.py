@@ -13,12 +13,16 @@ logger = logging.getLogger("bf1942_bot")
 
 LIKE_META_CHARS = re.compile(r"([%_\\])")
 
+MAP_LIST_TTL_SECONDS = 600
+
 
 class Database:
     def __init__(self, dsn: str):
         self.dsn = dsn
         self.pool: Optional[asyncpg.Pool] = None
         self.ch_client = None
+        self._map_names: Optional[List[str]] = None
+        self._map_names_loaded_at = 0.0
 
     async def connect(self):
         """Creates the database connection pool."""
@@ -278,9 +282,17 @@ class Database:
         return [row['current_server_name'] for row in rows]
 
     async def get_map_suggestions(self, query: str) -> List[str]:
-        sql = "SELECT DISTINCT map_name FROM rounds WHERE map_name ILIKE $1 ESCAPE '\\' LIMIT 25"
-        rows = await self.fetch(sql, self._safe_ilike_prefix(query))
-        return [row['map_name'] for row in rows]
+        # Autocomplete fires per keystroke; DISTINCT over all rounds each time
+        # is a full scan, so keep the (small) map list in memory for a while.
+        now = time.monotonic()
+        if self._map_names is None or now - self._map_names_loaded_at > MAP_LIST_TTL_SECONDS:
+            rows = await self.fetch(
+                "SELECT DISTINCT map_name FROM rounds WHERE map_name IS NOT NULL ORDER BY map_name"
+            )
+            self._map_names = [row['map_name'] for row in rows]
+            self._map_names_loaded_at = now
+        prefix = query.strip().lower()
+        return [m for m in self._map_names if m.lower().startswith(prefix)][:25]
 
     async def get_gametype_suggestions(self, query: str) -> List[str]:
         sql = """
@@ -294,11 +306,13 @@ class Database:
         return [row['name'] for row in rows if row['name']]
 
     async def get_player_suggestions(self, query: str) -> List[str]:
+        # Search players directly; EXISTS uses the rps player_id index instead
+        # of a DISTINCT over every round_player_stats row.
         sql = """
         SELECT DISTINCT p.canonical_name AS player_name
-        FROM round_player_stats rps
-        JOIN players p ON rps.player_id = p.player_id
+        FROM players p
         WHERE p.canonical_name ILIKE $1 ESCAPE '\\'
+          AND EXISTS (SELECT 1 FROM round_player_stats rps WHERE rps.player_id = p.player_id)
         ORDER BY p.canonical_name
         LIMIT 25;
         """
