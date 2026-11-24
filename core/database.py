@@ -148,9 +148,12 @@ class Database:
             return
         try:
             import clickhouse_connect
+            # Queries run concurrently from worker threads (asyncio.to_thread);
+            # a shared session id makes ClickHouse reject overlapping queries.
             self.ch_client = clickhouse_connect.get_client(
                 host=ch_host, port=int(ch_port), database=ch_db,
-                username=ch_user, password=ch_password
+                username=ch_user, password=ch_password,
+                autogenerate_session_id=False,
             )
             logger.info("ClickHouse client connected.")
         except Exception as e:
