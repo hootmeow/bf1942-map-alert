@@ -13,7 +13,7 @@ class Watchlist(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         # Sets to track state
-        self.previously_online = set() # {player_name, ...}
+        self.previously_online = None # {player_name, ...}; None until the first poll
         self.cooldowns = {} # {(user_id, player_name): expiration_timestamp}
         self.check_watchlist.start()
 
@@ -130,9 +130,11 @@ class Watchlist(commands.Cog):
             current_online = {r['player_name']: r['current_server_name'] for r in rows}
             current_online_names = set(current_online.keys())
 
-            # 2. Identify Just Joined (Present now, but NOT in previous cycle)
+            # 2. Identify Just Joined (Present now, but NOT in previous cycle).
+            # Skip only the very first poll; an empty previous set (nobody
+            # online) must still alert on the first player to join.
             just_joined_names = []
-            if self.previously_online:
+            if self.previously_online is not None:
                 just_joined_names = [name for name in current_online_names if name not in self.previously_online]
 
             # Update state for next loop
