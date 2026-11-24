@@ -1,3 +1,4 @@
+import datetime
 import discord
 from discord.ext import commands
 import os
@@ -6,6 +7,7 @@ import traceback
 from dotenv import load_dotenv
 from core.database import Database
 from core.logger import logger
+from core.version import GIT_COMMIT, __version__
 
 # Load configuration
 load_dotenv()
@@ -47,6 +49,9 @@ class BF1942Bot(commands.Bot):
 
         # Guards one-time startup work (on_ready re-fires on every reconnect)
         self._startup_done = False
+
+        # For /about uptime
+        self.started_at = datetime.datetime.now(datetime.timezone.utc)
 
         # Load Cogs
         self.load_extensions()
@@ -99,7 +104,7 @@ class BF1942Bot(commands.Bot):
         await super().start(token, reconnect=reconnect)
 
     async def on_ready(self):
-        logger.info(f"Logged in as {self.user} (ID: {self.user.id})")
+        logger.info(f"Logged in as {self.user} (ID: {self.user.id}) — v{__version__} ({GIT_COMMIT or 'no git'})")
 
         # on_ready fires again on every gateway reconnect — only sync
         # commands once per process.
